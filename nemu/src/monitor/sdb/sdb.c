@@ -16,6 +16,7 @@
 #include "sdb.h"
 #include "utils.h"
 #include <cpu/cpu.h>
+#include <ctype.h>
 #include <isa.h>
 #include <readline/history.h>
 #include <readline/readline.h>
@@ -54,6 +55,46 @@ static int cmd_q(char *args) {
   return -1;
 }
 
+static void cmd_error_log(char const *cmd_name, char const *msg) {
+  static char const *const CMD_ERROR_OUTPUT_FMT =
+      "*** [cmd:%s] [DO NOTHING] DUE TO %s***\n";
+  printf(CMD_ERROR_OUTPUT_FMT, cmd_name, msg);
+}
+
+static int cmd_si(char *args) {
+  char *number = strtok(NULL, " "); // delimiter = space
+  for (char *ptr = number; ptr; ptr++) {
+    if (!isdigit(ptr)) {
+      cmd_error_log("si", "non-digit input");
+      return 0;
+    }
+  }
+
+  int const times = number ? atoi(number) : 1;
+  cpu_exec(times);
+  return 0;
+}
+
+static int cmd_info(char *args) {
+  char *target = strtok(NULL, " ");
+  if (target == NULL || strlen(target) > 1) {
+    cmd_error_log("info",
+                  target ? "invalid argument" : "insufficient arguments");
+    return 0;
+  }
+  switch (*target) {
+  case 'r':
+    isa_reg_display();
+    break;
+  case 'w':
+    // TODO: print watch points
+    break;
+  default:
+    cmd_error_log("info", "unknown argument");
+  }
+  return 0;
+}
+
 static int cmd_help(char *args);
 
 static struct {
@@ -66,8 +107,8 @@ static struct {
     {"q", "Exit NEMU", cmd_q},
 
     /* TODO: Add more commands */
-
-};
+    {"si", "Step Instruction [N]", cmd_si},
+    {"info", "Show program status", cmd_info}};
 
 #define NR_CMD ARRLEN(cmd_table)
 
