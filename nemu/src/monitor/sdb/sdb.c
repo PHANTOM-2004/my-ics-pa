@@ -14,6 +14,8 @@
  ***************************************************************************************/
 
 #include "sdb.h"
+#include "common.h"
+#include "memory/paddr.h"
 #include "utils.h"
 #include <cpu/cpu.h>
 #include <ctype.h>
@@ -95,6 +97,49 @@ static int cmd_info(char *args) {
   return 0;
 }
 
+static bool _str_isdigit(char const *_num) {
+  for (; *_num; ++_num) {
+    if (!isdigit(*_num))
+      return false;
+  }
+  return true;
+}
+static int cmd_x(char *args) {
+  // parse the args, needed N and expr.
+  // need to be done after calculation of EXPR
+  // printf("%s\n", args);
+  char const *_str_number = strtok(NULL, " ");
+  if (_str_number == NULL) {
+    cmd_error_log("x", "lack of number");
+    return 0;
+  }
+  if (!_str_isdigit(_str_number)) {
+    cmd_error_log("x", "invalid number");
+    return 0;
+  }
+  int const _number = atoi(_str_number);
+  char const *expr = strtok(NULL, " ");
+  if (expr == NULL) {
+    cmd_error_log("x", "lack of expression");
+    return 0;
+  }
+  // todo: we suppose expression is simple number
+  char *endptr = NULL;
+  // todo: process error
+  word_t const addr = (word_t)strtoul(expr, &endptr, 16); // addr
+  if (!likely(in_pmem(addr)) || !likely(in_pmem(addr + _number - 1))) {
+    cmd_error_log("x", "out of range");
+    return 0;
+  } // prediction
+  for (word_t pos = addr; pos < addr + _number; pos++) {
+    // each time a word
+    word_t const value = paddr_read(pos, 4);
+    printf(FMT_WORD ":\t\t" FMT_WORD "\n", pos, value);
+  }
+
+  return 0;
+}
+
 static int cmd_help(char *args);
 
 static struct {
@@ -108,7 +153,8 @@ static struct {
 
     /* TODO: Add more commands */
     {"si", "Step Instruction [N]", cmd_si},
-    {"info", "Show program status", cmd_info}};
+    {"info", "Show program status", cmd_info},
+    {"x", "Scan memory", cmd_x}};
 
 #define NR_CMD ARRLEN(cmd_table)
 
