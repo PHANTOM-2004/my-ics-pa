@@ -208,14 +208,14 @@ static word_t expr_eval(char const *expr, int const p, int const q,
           continue;
         if (main_op_type < 0)
           main_op_type = tokens[i].type;
-        else if (get_priority(tokens[i].type) <= main_op_type)
+        else if (get_priority(tokens[i].type) <= get_priority(main_op_type))
           main_op_type = tokens[i].type; // update main operator
       }
 
       if (main_op_type < 0) {
         // impossible come here
-        Assert(0, "no main operator\n");
         *success = false;
+        Assert(0, "no main operator\n");
         return 0;
       }
 
