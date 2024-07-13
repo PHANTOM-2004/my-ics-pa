@@ -17,12 +17,19 @@
 #include "common.h"
 #include <isa.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 const char *regs[] = {"$0", "ra", "sp",  "gp",  "tp", "t0", "t1", "t2",
                       "s0", "s1", "a0",  "a1",  "a2", "a3", "a4", "a5",
                       "a6", "a7", "s2",  "s3",  "s4", "s5", "s6", "s7",
                       "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6"};
 
+static void print_byte(uint8_t const _byte) {
+  for (int i = 7; i >= 0; i--) {
+    word_t const mask = 1 << i;
+    printf("%u", !!(_byte & mask));
+  }
+}
 void isa_reg_display() {
   /* this is what gdb print
   (gdb) info registers
@@ -57,12 +64,26 @@ gs             0x0                 0
     // 32/8 = 4
     word_t const cur_reg = gpr(i);
     printf("RegID: %2d RegName: %-10s Content: " FMT_WORD, i, regs[i], cur_reg);
-    void const *ptr = &cur_reg;
-    word_t const R3 = *(uint8_t *)(ptr);
-    word_t const R2 = *(uint8_t *)(ptr + 1);
-    word_t const R1 = *(uint8_t *)(ptr + 2);
-    word_t const R0 = *(uint8_t *)(ptr + 3);
-    printf("\t\tDetailed: %08u %08u %08u %08u\n", R3, R2, R1, R0);
+    // TODO: we need to use bit rather than pointer
+    word_t const MASK0 = 0xff;
+    word_t const MASK1 = 0xff00;
+    word_t const MASK2 = 0xff0000;
+    word_t const MASK3 = 0xff000000;
+
+    uint8_t const R0 = (uint8_t)(MASK0 & cur_reg);
+    uint8_t const R1 = (uint8_t)((MASK1 & cur_reg) >> 8);
+    uint8_t const R2 = (uint8_t)((MASK2 & cur_reg) >> 16);
+    uint8_t const R3 = (uint8_t)((MASK3 & cur_reg) >> 24);
+
+    printf("\tDetailed: ");
+    print_byte(R3);
+    printf(" ");
+    print_byte(R2);
+    printf(" ");
+    print_byte(R1);
+    printf(" ");
+    print_byte(R0);
+    printf("\n");
   }
 }
 
