@@ -159,7 +159,8 @@ static int check_paretheses(char const *expr, int const p, int const q) {
   return paretheses;
 }
 
-static int get_priority(int _op_type) {
+static bool is_op_valid(int const _op_type) { return _op_type >= 0; }
+static int get_op_priority(int const _op_type) {
   switch (_op_type) {
   case '+':
     return 0;
@@ -202,20 +203,23 @@ static word_t expr_eval(char const *expr, int const p, int const q,
       // find the main operator, with the lowest priority
       int main_op_type = -1;
       for (int i = 0; i < nr_token; i++) {
-        bool is_main_op = (tokens[i].type == '+') || (tokens[i].type == '-') ||
-                          (tokens[i].type == '*') || (tokens[i].type == '/');
+        bool const is_main_op =
+            (tokens[i].type == '+') || (tokens[i].type == '-') ||
+            (tokens[i].type == '*') || (tokens[i].type == '/');
         if (!is_main_op)
           continue;
-        if (main_op_type < 0)
+        if (!is_op_valid(main_op_type))
           main_op_type = tokens[i].type;
-        else if (get_priority(tokens[i].type) <= get_priority(main_op_type))
+        else if (get_op_priority(tokens[i].type) <=
+                 get_op_priority(main_op_type))
           main_op_type = tokens[i].type; // update main operator
       }
-
-      if (main_op_type < 0) {
+      Log("main op: %c", main_op_type);
+      if (!is_op_valid(main_op_type)) {
         // impossible come here
         *success = false;
-        Assert(0, "no main operator\n");
+        Log("[SYNTAX ERROR] no main operator");
+        // Assert(0, "no main operator\n");
         return 0;
       }
 
@@ -226,9 +230,27 @@ static word_t expr_eval(char const *expr, int const p, int const q,
           continue;
         left = i - 1;
         right = i + 1;
+        // we need to find the last operator
       }
-
-      return expr_eval(expr, left, right, success);
+      // merge
+      word_t const val1 = expr_eval(expr, p, left, success);
+      word_t const val2 = expr_eval(expr, right, q, success);
+      switch (main_op_type) {
+      case '+':
+        return val1 + val2;
+      case '-':
+        return val1 - val2;
+      case '*':
+        return val1 * val2;
+      case '/':
+        if (val2 == 0)
+          Log("[DIVISION ERROR]Divisor cannot be zero");
+        return val1 / val2;
+      default:
+        Log("[UNKNOWN OPERATOR] %c", main_op_type);
+        return 0;
+      }
+      return 0; // we cannot reach here
     }
   }
 }
@@ -242,6 +264,4 @@ word_t expr(char *e, bool *success) {
   /* TODO: Insert codes to evaluate the expression. */
   word_t const res = expr_eval(e, 0, (int)strlen(e) - 1, success);
   return res;
-
-  return 0;
 }
