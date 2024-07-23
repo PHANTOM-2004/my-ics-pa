@@ -41,13 +41,15 @@ static struct rule {
      * Pay attention to the precedence level of different rules.
      */
 
-    {" +", TK_NOTYPE}, // spaces
-    {"\\+", '+'},      // plus. [CYT] + is special in regex
-    {"==", TK_EQ},     // equal
-    {"\\(", '('},         {"\\)", ')'}, {"\\-", '-'}, // minus
-    {"\\*", '*'},                                     // mult
-    {"\\\\", '\\'},                                   // div
-    {"\\d+", TK_INT_DEC},
+    {"([0-9]+)|([0-9]+[uU])", TK_INT_DEC}, // \d+
+    {" +", TK_NOTYPE},                     // spaces
+    {"\\+", '+'},                          // plus. [CYT] + is special in regex
+    {"==", TK_EQ},                         // equal
+    {"\\(", '('},                          // \(      {"\\)", ')'}, //
+    {"\\)", ')'},                          // \)
+    {"\\-", '-'},                          // \-
+    {"\\*", '*'},                          // \*
+    {"/", '/'},                            // /
 };
 
 #define NR_REGEX ARRLEN(rules)
@@ -76,7 +78,7 @@ typedef struct token {
   char str[32];
 } Token;
 
-static Token tokens[32] __attribute__((used)) = {};
+static Token tokens[128] __attribute__((used)) = {};
 static int nr_token __attribute__((used)) = 0;
 
 static bool make_token(char *e) {
@@ -112,25 +114,29 @@ static bool make_token(char *e) {
         case '/':
         case '(':
         case ')':
+        case TK_NOTYPE:
           tokens[nr_token].type =
               rules[i].token_type; // it is simple to just add type
           break;
 
         case TK_INT_DEC:
           // check the len first;
-          if (substr_len > 32) {
+          if (substr_len > 10) { // at most 10 for 2147483647
             printf("[REGEX ERROR] int too large, result is invalid\n");
             return false;
           }
-          int const cpy_len = substr_len < 32 ? substr_len : 32;
+
+          tokens[nr_token].type = TK_INT_DEC;
+          int const cpy_len = substr_len < 10 ? substr_len : 10;
           strncpy(tokens[nr_token].str, substr_start, cpy_len);
           break;
 
         default:
+          Log("token type error: %d", rules[i].token_type);
           TODO();
         }
-
-        break;
+        nr_token++; // a match
+        break;      // jump out of loop
       }
     }
 
@@ -143,20 +149,31 @@ static bool make_token(char *e) {
   return true;
 }
 
-static int check_paretheses(char const *expr, int const p, int const q) {
+static int check_paretheses(int const p, int const q) {
   // maybe multiple ()
   int cnt = 0;
-  bool paretheses = false;
   for (int i = p; i <= q; i++) {
-    if (expr[i] == '(') {
+    if (tokens[i].type == '(') {
       cnt++;
-      paretheses = true;
-    } else if (expr[i] == ')')
+    } else if (tokens[i].type == ')')
       cnt--;
     if (cnt < 0)
       return -1; // invalid expression
   }
-  return paretheses;
+
+  if (tokens[p].type != '(')
+    return false; // not surround by ()
+
+  cnt = 0;
+  for (int i = p + 1; i <= q - 1; i++) {
+    if (tokens[i].type == '(')
+      cnt++;
+    else if (tokens[i].type == ')')
+      cnt--;
+    if (cnt < 0)
+      return false; // not surround by valid ()
+  }
+  return true;
 }
 
 static bool is_op_valid(int const _op_type) { return _op_type >= 0; }
@@ -176,82 +193,112 @@ static int get_op_priority(int const _op_type) {
   }
 }
 
-static word_t expr_eval(char const *expr, int const p, int const q,
-                        bool *success) {
+static int find_main_op(int const p, int const q) {
+  int main_op_type = -1;
+  int cnt = 0;
+  int pos = -1;
+  // main op should not be surround by ()
+  for (int i = p; i <= q; i++) {
+    cnt += tokens[i].type == '(';
+    cnt -= tokens[i].type == ')';
+    bool const is_main_op =
+        cnt == 0 && ((tokens[i].type == '+') || (tokens[i].type == '-') ||
+                     (tokens[i].type == '*') || (tokens[i].type == '/'));
+    if (!is_main_op)
+      continue;
+    // find main operator
+    if (!is_op_valid(main_op_type)) {
+      main_op_type = tokens[i].type;
+      pos = i;
+    } else if (get_op_priority(tokens[i].type) <=
+               get_op_priority(main_op_type)) {
+      main_op_type = tokens[i].type; // update main operator
+      pos = i;
+    }
+  }
+
+  return pos;
+}
+
+static word_t expr_eval(char const *const expr, int _p, int _q,
+                        bool *const success) {
+  Log("before: p%d, q:%d", _p, _q);
+  while (tokens[_p].type == TK_NOTYPE)
+    ++_p;
+  while (tokens[_q].type == TK_NOTYPE)
+    --_q;
+  Log("trimmed: p:%d, q:%d", _p, _q);
+
+  int const p = _p, q = _q;
+
   if (p > q) {
     // bad expression
     *success = false;
     return 0;
-  } else if (p == q) {
+  }
+
+  else if (p == q) {
     // trivial expression, it is just a number
     // due to regex, judge whether or not it is number
+    return (word_t)strtoul(tokens[p].str, NULL, 10); // dec number
+  }
 
-    word_t const res = (word_t)strtoul(expr, NULL, 10); // dec number
-    return res;
-  } else {
-    // check status
-    int res = check_paretheses(expr, p, q);
+  else {
+
+    int res = check_paretheses(p, q);
     if (res < 0) {
+      Log("[SYNTAX ERROR] not valid ()");
       *success = false;
       return 0;
     } // invalid ()
+
+    // we need to trim ()
     else if (res)
       return expr_eval(expr, p + 1, q - 1, success);
-    else {
-      // divide into single expression, according to tokens
 
-      // find the main operator, with the lowest priority
-      int main_op_type = -1;
-      for (int i = 0; i < nr_token; i++) {
-        bool const is_main_op =
-            (tokens[i].type == '+') || (tokens[i].type == '-') ||
-            (tokens[i].type == '*') || (tokens[i].type == '/');
-        if (!is_main_op)
-          continue;
-        if (!is_op_valid(main_op_type))
-          main_op_type = tokens[i].type;
-        else if (get_op_priority(tokens[i].type) <=
-                 get_op_priority(main_op_type))
-          main_op_type = tokens[i].type; // update main operator
-      }
-      Log("main op: %c", main_op_type);
-      if (!is_op_valid(main_op_type)) {
-        // impossible come here
-        *success = false;
-        Log("[SYNTAX ERROR] no main operator");
-        // Assert(0, "no main operator\n");
-        return 0;
-      }
-
-      // divide and conquer
-      int left = p, right = q;
-      for (int i = p; i <= q; i++) {
-        if (expr[i] != main_op_type)
-          continue;
-        left = i - 1;
-        right = i + 1;
-        // we need to find the last operator
-      }
-      // merge
-      word_t const val1 = expr_eval(expr, p, left, success);
-      word_t const val2 = expr_eval(expr, right, q, success);
-      switch (main_op_type) {
-      case '+':
-        return val1 + val2;
-      case '-':
-        return val1 - val2;
-      case '*':
-        return val1 * val2;
-      case '/':
-        if (val2 == 0)
-          Log("[DIVISION ERROR]Divisor cannot be zero");
-        return val1 / val2;
-      default:
-        Log("[UNKNOWN OPERATOR] %c", main_op_type);
-        return 0;
-      }
-      return 0; // we cannot reach here
+    // divide into single expression, according to tokens
+    // find the main operator, with the lowest priority
+    int const main_op_pos = find_main_op(p, q);
+    if (main_op_pos < 0) {
+      // impossible come here
+      *success = false;
+      Log("[SYNTAX ERROR] no main operator");
+      // Assert(0, "no main operator\n");
+      return 0;
     }
+    int const main_op_type = tokens[main_op_pos].type;
+
+    Log("main op: %c", main_op_type);
+
+    // divide and conquer
+    word_t const val1 = expr_eval(expr, p, main_op_pos - 1, success);
+    word_t const val2 = expr_eval(expr, main_op_pos + 1, q, success);
+
+    word_t algo_res = 0;
+    switch (main_op_type) {
+    case '+':
+      algo_res = val1 + val2;
+      break;
+    case '-':
+      algo_res = val1 - val2;
+      break;
+    case '*':
+      algo_res = val1 * val2;
+      break;
+    case '/':
+      if (val2 == 0) {
+        Log("[DIVISION ERROR]Divisor cannot be zero");
+        *success = false;
+        return 0;
+      }
+      algo_res = val1 / val2;
+      break;
+    default:
+      Log("[UNKNOWN OPERATOR] %c", main_op_type);
+      return 0;
+    }
+    Log("tmp expr:%u %c %u = %u", val1, (char)main_op_type, val2, algo_res);
+    return algo_res;
   }
 }
 
@@ -260,8 +307,8 @@ word_t expr(char *e, bool *success) {
     *success = false;
     return 0;
   }
-
+  *success = true;
   /* TODO: Insert codes to evaluate the expression. */
-  word_t const res = expr_eval(e, 0, (int)strlen(e) - 1, success);
+  word_t const res = expr_eval(e, 0, nr_token - 1, success);
   return res;
 }
