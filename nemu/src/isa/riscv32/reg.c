@@ -63,7 +63,8 @@ gs             0x0                 0
     // we use word_t here
     // 32/8 = 4
     word_t const cur_reg = gpr(i);
-    printf("RegID: %2d RegName: %-10s Content: " FMT_WORD, i, regs[i], cur_reg);
+    printf("RegID: %2d RegName: %-10s Content: " FMT_WORD, i, reg_name(i),
+           cur_reg);
     // TODO: we need to use bit rather than pointer
     word_t const MASK0 = 0xff;
     word_t const MASK1 = 0xff00;
@@ -87,4 +88,17 @@ gs             0x0                 0
   }
 }
 
-word_t isa_reg_str2val(const char *s, bool *success) { return 0; }
+word_t isa_reg_str2val(const char *s, bool *success) {
+  for (int i = 0; i < 32; i++) {
+    int const ret = strcmp(s, reg_name(i));
+    if (ret)
+      continue;
+    *success = true;
+    Log("convert register %s -> %d", s, i);
+    return gpr(i);
+  }
+
+  Log("[REGISTER] unknown register %s", s);
+  *success = false;
+  return 0;
+}

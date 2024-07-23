@@ -17,6 +17,8 @@
 #include "debug.h"
 #include <isa.h>
 
+#include "memory/paddr.h"
+
 /* We use the POSIX regex functions to process regular expressions.
  * Type 'man regex' for more information about POSIX regex functions.
  */
@@ -30,6 +32,11 @@ enum {
   /* TODO: Add more token types */
   // plus -> +, minus-> -
   // ( -> (. ) -> )
+  TK_INT_HEX, // 0x
+  TK_DEREF,   // pointer type
+  TK_UNEQ,
+  TK_LAND,
+  TK_REG
 };
 
 static struct rule {
@@ -50,6 +57,23 @@ static struct rule {
     {"\\-", '-'},                          // \-
     {"\\*", '*'},                          // \*
     {"/", '/'},                            // /
+
+    /*These are extended tokesn*/
+    {"0x[0-9]+", TK_INT_HEX},
+    {"\\*", TK_DEREF}, // actually it useless here,
+    {"!=", TK_UNEQ},
+    {"&&", TK_LAND},
+    {"\\$(0|[12][0-9]|3[01])", TK_REG},
+    {"\\$0|ra|sp|gp|tp|t[0-6]|s[01]|a[0-7]|s[2-9]|s1[01]", TK_REG},
+};
+
+static bool binary_operator(int const tk_type) {
+  return tk_type == '+' || tk_type == '-' || tk_type == '/' || tk_type == '*' ||
+         tk_type == TK_UNEQ || tk_type == TK_EQ || tk_type == TK_LAND;
+}
+
+static bool is_operator(int const tk_type) {
+  return binary_operator(tk_type) || tk_type == TK_DEREF || tk_type == TK_REG;
 };
 
 #define NR_REGEX ARRLEN(rules)
@@ -105,7 +129,6 @@ static bool make_token(char *e) {
          * to record the token in the array `tokens'. For certain types
          * of tokens, some extra actions should be performed.
          */
-
         switch (rules[i].token_type) {
           // record tokens in array tokens
         case '+':
@@ -114,19 +137,35 @@ static bool make_token(char *e) {
         case '/':
         case '(':
         case ')':
+        case TK_EQ:
+        case TK_UNEQ:
+        case TK_DEREF:
         case TK_NOTYPE:
           tokens[nr_token].type =
               rules[i].token_type; // it is simple to just add type
           break;
 
+        case TK_REG:
+          if (substr_len > 2 + 1) // invalid reg
+          {
+            Log("[REGEX ERROR] reg invalid");
+            return false;
+          }
+          tokens[nr_token].type = rules[i].token_type;
+          strncpy(tokens[nr_token].str, substr_start, substr_len);
+          break;
+
         case TK_INT_DEC:
+        case TK_INT_HEX:
           // check the len first;
-          if (substr_len > 10) { // at most 10 for 2147483647
-            printf("[REGEX ERROR] int too large, result is invalid\n");
+
+          if (substr_len > 10) {
+            // at most 10 for 2147483648*2-1, and 0xffffffff
+            Log("[REGEX ERROR] int too large, result is invalid");
             return false;
           }
 
-          tokens[nr_token].type = TK_INT_DEC;
+          tokens[nr_token].type = rules[i].token_type;
           int const cpy_len = substr_len < 10 ? substr_len : 10;
           strncpy(tokens[nr_token].str, substr_start, cpy_len);
           break;
@@ -179,14 +218,25 @@ static int check_paretheses(int const p, int const q) {
 static bool is_op_valid(int const _op_type) { return _op_type >= 0; }
 static int get_op_priority(int const _op_type) {
   switch (_op_type) {
+  case TK_EQ:
+  case TK_UNEQ:
+    return -2; // eg: a == b || b == c
+
+  case TK_LAND:
+    return -1;
+
+  case TK_DEREF: // deref first
+  case TK_REG:   // $ first
+    return 2;
+
   case '+':
-    return 0;
   case '-':
     return 0;
+
   case '*':
-    return 1;
   case '/':
     return 1;
+
   default:
     Assert(0, "unknown operator");
     return -1;
@@ -201,9 +251,8 @@ static int find_main_op(int const p, int const q) {
   for (int i = p; i <= q; i++) {
     cnt += tokens[i].type == '(';
     cnt -= tokens[i].type == ')';
-    bool const is_main_op =
-        cnt == 0 && ((tokens[i].type == '+') || (tokens[i].type == '-') ||
-                     (tokens[i].type == '*') || (tokens[i].type == '/'));
+    bool const is_main_op = cnt == 0 && is_operator(tokens[i].type);
+
     if (!is_main_op)
       continue;
     // find main operator
@@ -220,8 +269,68 @@ static int find_main_op(int const p, int const q) {
   return pos;
 }
 
+static word_t _algo_dual_calc(int const tk, word_t val1, word_t val2,
+                              bool *success) {
+  Assert(binary_operator(tk), "Not biniary operator");
+  word_t res = 0;
+  switch (tk) {
+  case '+':
+    res = val1 + val2;
+    break;
+  case '-':
+    res = val1 - val2;
+    break;
+  case '*':
+    res = val1 * val2;
+    break;
+  case '/':
+    if (val2 == 0) {
+      *success = false;
+      Log("[DIVISION ERROR]Divisor cannot be zero");
+      return 0;
+    }
+    res = val1 / val2;
+    break;
+
+  case TK_LAND:
+    res = val1 && val2;
+    break;
+  case TK_EQ:
+    res = val1 == val2;
+    break;
+  case TK_UNEQ:
+    res = val1 != val2;
+    break;
+
+  default:
+    Log("Unknown operator: %d", tk);
+    TODO();
+  }
+
+  Log("tmp expr:%u %d(%c) %u = %u", val1, tk, (char)tk, val2, res);
+  return res;
+}
+
+static word_t get_tk_number(int const p, bool *success) {
+  int const tk = tokens[p].type;
+  char const *const str = tokens[p].str;
+  Assert(tk == TK_INT_DEC || tk == TK_INT_DEC || tk == TK_REG,
+         "token must be number");
+  word_t res = 0;
+  if (tk == TK_INT_DEC) {
+    res = (word_t)strtoul(str, NULL, 10);
+  } else if (tk == TK_INT_HEX) {
+    Assert(str[0] == '0' && str[1] == 'x', "hex number must be 0x**..*");
+    res = (word_t)strtoul(str + 2, NULL, 10);
+  } else {
+    res = isa_reg_str2val(str, success);
+  }
+  return res;
+}
+
 static word_t expr_eval(char const *const expr, int _p, int _q,
                         bool *const success) {
+  // we need to trim ()
   Log("before: p%d, q:%d", _p, _q);
   while (tokens[_p].type == TK_NOTYPE)
     ++_p;
@@ -238,9 +347,9 @@ static word_t expr_eval(char const *const expr, int _p, int _q,
   }
 
   else if (p == q) {
-    // trivial expression, it is just a number
+    // trivial expression, it is just a number hex or dec
     // due to regex, judge whether or not it is number
-    return (word_t)strtoul(tokens[p].str, NULL, 10); // dec number
+    return get_tk_number(p, success);
   }
 
   else {
@@ -252,7 +361,6 @@ static word_t expr_eval(char const *const expr, int _p, int _q,
       return 0;
     } // invalid ()
 
-    // we need to trim ()
     else if (res)
       return expr_eval(expr, p + 1, q - 1, success);
 
@@ -267,39 +375,36 @@ static word_t expr_eval(char const *const expr, int _p, int _q,
       return 0;
     }
     int const main_op_type = tokens[main_op_pos].type;
-
     Log("main op: %c", main_op_type);
+
+    // special for deref *, if there is deref,
+    // there must deref only, since deref has highest priority
+    // these are for single operator
+    if (main_op_type == TK_DEREF) {
+      word_t const addr = expr_eval(expr, main_op_pos + 1, q, success);
+      if (!likely(in_pmem(addr))) {
+        Log("[ERROR] address out of bound");
+        *success = false;
+        return 0;
+      } // out of bound
+      word_t const read_mem = paddr_read(addr, 4);
+      Log("[MEMORY] read from " FMT_WORD ": " FMT_WORD, addr, read_mem);
+      return read_mem;
+    }
 
     // divide and conquer
     word_t const val1 = expr_eval(expr, p, main_op_pos - 1, success);
     word_t const val2 = expr_eval(expr, main_op_pos + 1, q, success);
 
-    word_t algo_res = 0;
-    switch (main_op_type) {
-    case '+':
-      algo_res = val1 + val2;
-      break;
-    case '-':
-      algo_res = val1 - val2;
-      break;
-    case '*':
-      algo_res = val1 * val2;
-      break;
-    case '/':
-      if (val2 == 0) {
-        Log("[DIVISION ERROR]Divisor cannot be zero");
-        *success = false;
-        return 0;
-      }
-      algo_res = val1 / val2;
-      break;
-    default:
-      Log("[UNKNOWN OPERATOR] %c", main_op_type);
-      return 0;
-    }
-    Log("tmp expr:%u %c %u = %u", val1, (char)main_op_type, val2, algo_res);
+    word_t const algo_res = _algo_dual_calc(main_op_type, val1, val2, success);
+
     return algo_res;
   }
+}
+
+static bool _deref_special_tk(int const pre_tk) {
+  // the prev is operator not number, or prev is just a (
+  return is_operator(pre_tk) || pre_tk == '(';
 }
 
 word_t expr(char *e, bool *success) {
@@ -309,6 +414,13 @@ word_t expr(char *e, bool *success) {
   }
   *success = true;
   /* TODO: Insert codes to evaluate the expression. */
+
+  for (int i = 0; i < nr_token; i++) {
+    if (tokens[i].type == '*' &&
+        (i == 0 || _deref_special_tk(tokens[i - 1].type)))
+      tokens[i].type = TK_DEREF; // this is to judge for pointer
+  }
+
   word_t const res = expr_eval(e, 0, nr_token - 1, success);
   return res;
 }
