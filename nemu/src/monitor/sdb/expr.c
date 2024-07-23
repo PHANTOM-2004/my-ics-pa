@@ -76,6 +76,29 @@ static bool is_operator(int const tk_type) {
   return binary_operator(tk_type) || tk_type == TK_DEREF || tk_type == TK_REG;
 };
 
+static char const *op_type_to_str(int const op_type) {
+  switch (op_type) {
+  case '+':
+    return "+";
+  case '-':
+    return "-";
+  case '*':
+    return "*";
+  case '/':
+    return "/";
+  case TK_LAND:
+    return "&&";
+  case TK_EQ:
+    return "==";
+  case TK_UNEQ:
+    return "!=";
+
+  default:
+    TODO();
+    return NULL;
+  }
+}
+
 #define NR_REGEX ARRLEN(rules)
 
 static regex_t re[NR_REGEX] = {};
@@ -141,6 +164,7 @@ static bool make_token(char *e) {
         case TK_UNEQ:
         case TK_DEREF:
         case TK_NOTYPE:
+        case TK_LAND:
           tokens[nr_token].type =
               rules[i].token_type; // it is simple to just add type
           break;
@@ -220,10 +244,10 @@ static int get_op_priority(int const _op_type) {
   switch (_op_type) {
   case TK_EQ:
   case TK_UNEQ:
-    return -2; // eg: a == b || b == c
+    return -1; // eg: a == b || b == c
 
   case TK_LAND:
-    return -1;
+    return -2;
 
   case TK_DEREF: // deref first
   case TK_REG:   // $ first
@@ -307,7 +331,7 @@ static word_t _algo_dual_calc(int const tk, word_t val1, word_t val2,
     TODO();
   }
 
-  Log("tmp expr:%u %d(%c) %u = %u", val1, tk, (char)tk, val2, res);
+  Log("tmp expr:%u %s %u = %u", val1, op_type_to_str(tk), val2, res);
   return res;
 }
 
@@ -360,7 +384,6 @@ static word_t expr_eval(char const *const expr, int _p, int _q,
       *success = false;
       return 0;
     } // invalid ()
-
     else if (res)
       return expr_eval(expr, p + 1, q - 1, success);
 
@@ -375,7 +398,7 @@ static word_t expr_eval(char const *const expr, int _p, int _q,
       return 0;
     }
     int const main_op_type = tokens[main_op_pos].type;
-    Log("main op: %c", main_op_type);
+    Log("main op: %s", op_type_to_str(main_op_type));
 
     // special for deref *, if there is deref,
     // there must deref only, since deref has highest priority

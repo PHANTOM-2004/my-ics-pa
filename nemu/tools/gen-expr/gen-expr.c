@@ -34,6 +34,26 @@ static int const EXPR_TREE_NODE_SIZE = 10 + 1; // at most 10 number, and a u
 
 static int choose(int const n) { return (uint32_t)rand() % n; }
 
+enum {
+  OP_PLUS = '+',
+  OP_MINUS = '-',
+  OP_MULT = '*',
+  OP_DIV = '/',
+  OP_EQ = 0,
+  OP_UNEQ,
+  OP_LAND,
+};
+
+struct Operator {
+  int type;
+  char const *const str;
+} operators[] = {
+    {OP_PLUS, "+"}, {OP_MINUS, "-"}, {OP_MULT, "*"},  {OP_DIV, "/"},
+    {OP_EQ, "=="},  {OP_UNEQ, "!="}, {OP_LAND, "&&"},
+};
+static int const OP_MAX_LEN = 2;
+static int const nr_operators = sizeof(operators) / sizeof(operators[0]);
+
 static uint32_t gen_num(int *buf_pos,
                         int const spare_buf_len) { // rand() only is ok;
   assert(spare_buf_len >= 0);
@@ -70,16 +90,17 @@ static void gen(int *buf_pos, int const spare_buf_len, char const ch) {
   *buf_pos += 1;
   buf[*buf_pos] = '\0';
 }
-static char gen_op() {
+static int gen_op(int *buf_pos, int const spare_buf_len) {
   // op only fout;
-  static const char _operator[] = {'+', '-', '*', '/'};
-  static const int _op_nr = sizeof(_operator) / sizeof(_operator[0]);
-  char const op = _operator[choose(_op_nr)];
+  int const pos = choose(nr_operators);
+  int const _op_len = strlen(operators[pos].str);
 
-  return op;
+  for (int i = 0; i < _op_len; i++)
+    gen(buf_pos, spare_buf_len, operators[pos].str[i]);
+  return pos;
 }
 
-static uint32_t op_calc(char const op, uint32_t const val1,
+static uint32_t op_calc(int const op, uint32_t const val1,
                         uint32_t const val2) {
   uint32_t res = 0;
   switch (op) {
@@ -96,9 +117,23 @@ static uint32_t op_calc(char const op, uint32_t const val1,
     assert(val2);
     res = val1 / val2;
     break;
+    // TODO: more operator
+  case OP_UNEQ:
+    res = val1 != val2;
+    break;
+  case OP_EQ:
+    res = val1 == val2;
+    break;
+  case OP_LAND:
+    res = val1 && val2;
+    break;
+
   default:
+    fprintf(stderr, "unknown operator: %d\n", op);
     assert(0);
   }
+  // fprintf(stderr, "%u %d(%c) %u = %u\n", val1, op, (char)op, val2, res);
+  // fflush(stdout);
   return res;
 }
 static uint32_t _gen_rand_expr(int *buf_pos, int *spare_buf_len) {
@@ -111,7 +146,7 @@ static uint32_t _gen_rand_expr(int *buf_pos, int *spare_buf_len) {
 
   uint32_t res = 0;
   uint32_t val1 = 0, val2 = 0;
-  char op = 0;
+  int op_type = 0;
   int buf_pos_bak = 0;
   int spare_buf_len_bak = 0;
 
@@ -121,7 +156,7 @@ static uint32_t _gen_rand_expr(int *buf_pos, int *spare_buf_len) {
 
   if ((t == 1 && *spare_buf_len < 2) || // 2 for ()
       (t == 2 &&
-       (*spare_buf_len < EXPR_TREE_NODE_SIZE + 1))) // 1 for op, 2 for ()
+       (*spare_buf_len < EXPR_TREE_NODE_SIZE + OP_MAX_LEN))) // 2 for op
     t = 0;
 
   // printf("t: %d expr: %s\n", t, buf);
@@ -141,13 +176,12 @@ static uint32_t _gen_rand_expr(int *buf_pos, int *spare_buf_len) {
 
   case 2:
     *spare_buf_len -= EXPR_TREE_NODE_SIZE; // split into 2 nodes
-    *spare_buf_len -= 1;                   // op
+    *spare_buf_len -= OP_MAX_LEN;          // op
 
-    op = gen_op();
     /*generate val1*/
     val1 = _gen_rand_expr(buf_pos, spare_buf_len);
-    gen(buf_pos, *spare_buf_len, op); // put operator
-
+    /*generate operator */
+    op_type = operators[gen_op(buf_pos, *spare_buf_len)].type;
     /*generate val2*/
     buf_pos_bak = *buf_pos;             // backup pos
     spare_buf_len_bak = *spare_buf_len; // backup spare len
@@ -157,8 +191,8 @@ static uint32_t _gen_rand_expr(int *buf_pos, int *spare_buf_len) {
       *spare_buf_len = spare_buf_len_bak; // redo gen expr
       val2 = _gen_rand_expr(buf_pos, spare_buf_len);
       if (val2)
-        res = op_calc(op, val1, val2);
-    } while (op == '/' && (!res || !val2));
+        res = op_calc(op_type, val1, val2);
+    } while (op_type == '/' && (!val2));
 
     break;
     // end of case 2
