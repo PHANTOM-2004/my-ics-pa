@@ -22,7 +22,7 @@ int is_exit_status_bad();
 
 // these MACROs are for testing and debugging
 // ------------------------------------------
-#define __EXPR_TEST
+// #define __EXPR_TEST
 #ifdef __EXPR_TEST
 #include "monitor/sdb/sdb.h"
 #include <readline/readline.h>

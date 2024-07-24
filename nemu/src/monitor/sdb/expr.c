@@ -48,6 +48,7 @@ static struct rule {
      * Pay attention to the precedence level of different rules.
      */
 
+    {"0x[0-9]+", TK_INT_HEX},
     {"([0-9]+)|([0-9]+[uU])", TK_INT_DEC}, // \d+
     {" +", TK_NOTYPE},                     // spaces
     {"\\+", '+'},                          // plus. [CYT] + is special in regex
@@ -59,7 +60,6 @@ static struct rule {
     {"/", '/'},                            // /
 
     /*These are extended tokesn*/
-    {"0x[0-9]+", TK_INT_HEX},
     {"\\*", TK_DEREF}, // actually it useless here,
     {"!=", TK_UNEQ},
     {"&&", TK_LAND},
@@ -338,17 +338,26 @@ static word_t _algo_dual_calc(int const tk, word_t val1, word_t val2,
 static word_t get_tk_number(int const p, bool *success) {
   int const tk = tokens[p].type;
   char const *const str = tokens[p].str;
-  Assert(tk == TK_INT_DEC || tk == TK_INT_DEC || tk == TK_REG,
-         "token must be number");
+  Log("tk_number: %d", tk);
   word_t res = 0;
-  if (tk == TK_INT_DEC) {
+
+  switch (tk) {
+  case TK_INT_DEC:
     res = (word_t)strtoul(str, NULL, 10);
-  } else if (tk == TK_INT_HEX) {
+    break;
+  case TK_INT_HEX:
     Assert(str[0] == '0' && str[1] == 'x', "hex number must be 0x**..*");
-    res = (word_t)strtoul(str + 2, NULL, 10);
-  } else {
+    res = (word_t)strtoul(str + 2, NULL, 16);
+    break;
+  case TK_REG:
     res = isa_reg_str2val(str, success);
+    break;
+  default:
+    Assert(0, "token here must be number/register");
   }
+
+  Log("tk_number read: %s", str);
+  Log("tk_number get: " FMT_WORD, res);
   return res;
 }
 

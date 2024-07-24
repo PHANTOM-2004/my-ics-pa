@@ -24,6 +24,7 @@
 #include <readline/readline.h>
 
 static int is_batch_mode = false;
+#define CMD_ERROR_OUTPUT_FMT "[cmd:%s] [DO NOTHING] DUE TO %s"
 
 void init_regex();
 void init_wp_pool();
@@ -47,56 +48,6 @@ static char *rl_gets() {
   return line_read;
 }
 
-static int cmd_c(char *args) {
-  cpu_exec(-1);
-  return 0;
-}
-
-static int cmd_q(char *args) {
-  nemu_state.state = NEMU_QUIT; // set the flag, inorder to quit normally
-  return -1;
-}
-
-static void cmd_error_log(char const *cmd_name, char const *msg) {
-  static char const *const CMD_ERROR_OUTPUT_FMT =
-      "*** [cmd:%s] [DO NOTHING] DUE TO %s***\n";
-  printf(CMD_ERROR_OUTPUT_FMT, cmd_name, msg);
-}
-
-static int cmd_si(char *args) {
-  char *number = strtok(NULL, " "); // delimiter = space
-  for (char *ptr = number; ptr; ptr++) {
-    if (!isdigit(ptr)) {
-      cmd_error_log("si", "non-digit input");
-      return 0;
-    }
-  }
-
-  int const times = number ? atoi(number) : 1;
-  cpu_exec(times);
-  return 0;
-}
-
-static int cmd_info(char *args) {
-  char *target = strtok(NULL, " ");
-  if (target == NULL || strlen(target) > 1) {
-    cmd_error_log("info",
-                  target ? "invalid argument" : "insufficient arguments");
-    return 0;
-  }
-  switch (*target) {
-  case 'r':
-    isa_reg_display();
-    break;
-  case 'w':
-    // TODO: print watch points
-    break;
-  default:
-    cmd_error_log("info", "unknown argument");
-  }
-  return 0;
-}
-
 static bool _str_isdigit(char const *_num) {
   for (; *_num; ++_num) {
     if (!isdigit(*_num))
@@ -104,43 +55,16 @@ static bool _str_isdigit(char const *_num) {
   }
   return true;
 }
-static int cmd_x(char *args) {
-  // parse the args, needed N and expr.
-  // need to be done after calculation of EXPR
-  // printf("%s\n", args);
-  char const *_str_number = strtok(NULL, " ");
-  if (_str_number == NULL) {
-    cmd_error_log("x", "lack of number");
-    return 0;
-  }
-  if (!_str_isdigit(_str_number)) {
-    cmd_error_log("x", "invalid number");
-    return 0;
-  }
-  int const _number = atoi(_str_number);
-  char const *expr = strtok(NULL, " ");
-  if (expr == NULL) {
-    cmd_error_log("x", "lack of expression");
-    return 0;
-  }
-  // todo: we suppose expression is simple number
-  char *endptr = NULL;
-  // todo: process error
-  word_t const addr = (word_t)strtoul(expr, &endptr, 16); // addr
-  if (!likely(in_pmem(addr)) || !likely(in_pmem(addr + _number - 1))) {
-    cmd_error_log("x", "out of range");
-    return 0;
-  } // prediction
-  for (word_t pos = addr; pos < addr + _number; pos++) {
-    // each time a word
-    word_t const value = paddr_read(pos, 4);
-    printf(FMT_WORD ":\t\t" FMT_WORD "\n", pos, value);
-  }
-
-  return 0;
-}
-
+static int cmd_info(char *args);
+static int cmd_q(char *args);
+static int cmd_c(char *args);
+static int cmd_si(char *args);
 static int cmd_help(char *args);
+static int cmd_x(char *args);
+static int cmd_info(char *args);
+static int cmd_p(char *args);
+static int cmd_w(char *args);
+static int cmd_d(char *args);
 
 static struct {
   const char *name;
@@ -154,7 +78,11 @@ static struct {
     /* TODO: Add more commands */
     {"si", "Step Instruction [N]", cmd_si},
     {"info", "Show program status", cmd_info},
-    {"x", "Scan memory", cmd_x}};
+    {"x", "Scan memory", cmd_x},
+    {"p", "Caculate expression", cmd_p},
+    {"d", "Delete watchpoint", cmd_d},
+    {"w", "Add watchpoint", cmd_w},
+};
 
 #define NR_CMD ARRLEN(cmd_table)
 
@@ -177,6 +105,141 @@ static int cmd_help(char *args) {
     }
     printf("Unknown command '%s'\n", arg);
   }
+  return 0;
+}
+
+static int cmd_c(char *args) {
+  cpu_exec(-1);
+  return 0;
+}
+
+static int cmd_q(char *args) {
+  nemu_state.state = NEMU_QUIT; // set the flag, inorder to quit normally
+  return -1;
+}
+
+static int cmd_p(char *args) {
+  char *const _str = strtok(NULL, " ");
+  if (_str == NULL) {
+    Log(CMD_ERROR_OUTPUT_FMT, "p", "no expression");
+    return 0;
+  }
+
+  bool success = true;
+  word_t const res = expr(_str, &success);
+  if (!success) {
+    Log(CMD_ERROR_OUTPUT_FMT, "q", "invalid expression");
+    return -1;
+  }
+
+  printf("[ %s ] = " FMT_WORD "\n", _str, res);
+
+  return 0;
+}
+
+static int cmd_w(char *args) {
+  char *_expr = strtok(NULL, " ");
+  if (_expr == NULL || !strlen(_expr)) {
+    Log(CMD_ERROR_OUTPUT_FMT, "w", "no expression");
+    return 0;
+  }
+
+  int const res = wp_insert(_expr);
+  return res;
+}
+
+static int cmd_d(char *args) {
+  char *_num_str = strtok(NULL, " ");
+  if (_num_str == NULL) {
+    Log(CMD_ERROR_OUTPUT_FMT, "d", "lack of number");
+    return 0;
+  }
+  if (!_str_isdigit(_num_str)) {
+    Log(CMD_ERROR_OUTPUT_FMT, "d", "invalid number");
+    return 0;
+  }
+  int const id = atoi(_num_str);
+  int const res = wp_delete(id);
+  return res;
+}
+
+static int cmd_x(char *args) {
+  // parse the args, needed N and expr.
+  // need to be done after calculation of EXPR
+  // printf("%s\n", args);
+  char const *_str_number = strtok(NULL, " ");
+  if (_str_number == NULL) {
+    Log(CMD_ERROR_OUTPUT_FMT, "x", "lack of number");
+    return 0;
+  }
+  if (!_str_isdigit(_str_number)) {
+    Log(CMD_ERROR_OUTPUT_FMT, "x", "invalid number");
+    return 0;
+  }
+  int const _number = atoi(_str_number);
+
+  char *const _expr = strtok(NULL, " ");
+  if (_expr == NULL || !strlen(_expr)) {
+    Log(CMD_ERROR_OUTPUT_FMT, "x", "lack of expression");
+    return 0;
+  }
+  // calc expression
+  bool success = true;
+  word_t const addr = expr(_expr, &success);
+  if (success == false) {
+    Log(CMD_ERROR_OUTPUT_FMT, "x", "invalid expression");
+    return 0;
+  }
+
+  //
+  Log("read memory: [" FMT_WORD "-" FMT_WORD "]", addr, addr + _number - 1);
+  if (!likely(in_pmem(addr)) || !likely(in_pmem(addr + _number - 1))) {
+    Log(CMD_ERROR_OUTPUT_FMT, "x", "out of range");
+    return 0;
+  } // prediction
+
+  for (word_t pos = addr; pos < addr + _number; pos++) {
+    // each time a word
+    word_t const value = paddr_read(pos, 4);
+    printf(FMT_WORD ":\t\t" FMT_WORD "\n", pos, value);
+  }
+
+  return 0;
+}
+
+static int cmd_info(char *args) {
+  char *target = strtok(NULL, " ");
+  if (target == NULL || strlen(target) > 1) {
+    Log(CMD_ERROR_OUTPUT_FMT, "info",
+        target ? "invalid argument" : "insufficient arguments");
+    return 0;
+  }
+  switch (*target) {
+  case 'r':
+    isa_reg_display();
+    break;
+  case 'w':
+    // TODO: print watch points
+    print_watchpoint();
+    break;
+  default:
+    Log(CMD_ERROR_OUTPUT_FMT, "info", "unknown argument");
+    return 0;
+  }
+  return 0;
+}
+
+static int cmd_si(char *args) {
+  char *number = strtok(NULL, " "); // delimiter = space
+  for (char *ptr = number; ptr; ptr++) {
+    if (!isdigit(ptr)) {
+      Log(CMD_ERROR_OUTPUT_FMT, "si", "non-digit input");
+      return 0;
+    }
+  }
+
+  int const times = number ? atoi(number) : 1;
+  cpu_exec(times);
   return 0;
 }
 
