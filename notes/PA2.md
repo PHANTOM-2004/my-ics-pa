@@ -8,14 +8,60 @@
 ### MACRO
 
 #### 位操纵
-```cpp
+```c
 #define BITMASK(bits) ((1ull << (bits)) - 1)
 ```
 
-```cpp
+```c
 #define BITS(x, hi, lo) (((x) >> (lo)) & BITMASK((hi) - (lo) + 1)) // x[hi:lo], verilog
 ```
 这个宏就是取出`hi`到`lo`的`bit`. 
+
+#### 几种立即数类型
+> 这部分是框架已经提供的, 作为参考
+
+- `I-imm`
+```c
+#define immI() do { *imm = SEXT(BITS(i, 31, 20), 12); } while(0)
+```
+`I`这一种比较显然, 把原来的`12bit`进行扩展
+- `U-imm`
+```c
+#define immU() do { *imm = SEXT(BITS(i, 31, 12), 20) << 12; } while(0)
+```
+`U`这种也比较显然, 把原来的`20bit`进行扩展. 
+- `S-imm`
+```
+#define immS() do { *imm = (SEXT(BITS(i, 31, 25), 7) << 5) | BITS(i, 11, 7); } while(0)
+```
+`S`这种也先相对容易理解, 就是把立即数拼接起来. 立即数被编码放进了两部分. 
+
+> 框架的立即数是不够的, 需要我进行补充
+
+- `B-imm`
+> 值得注意的是`S/B`两个`type`的复杂性, 尤其是对于`S`. 具体可以看这一篇文章的[解释](https://stackoverflow.com/questions/58414772/why-are-risc-v-s-b-and-u-j-instruction-types-encoded-in-this-way#:~:text=The%20only%20difference%20between%20the,2%20in%20the%20B%20format.)
+> 总结下来有两点: (1)指令格式一致性方便译码 (2)默认2的倍数, 因此直接不存最低一位, 就可以多存一位, 最高位还是放在原来的地方, 因为那一位用于符号扩展. 
+```c
+#define immB()                                                  \
+  do {                                                          \
+    *imm = (BITS(i, 31, 31) << 12) | (BITS(i, 7, 7) << 11) |    \
+           (BITS(i, 30, 25) << 5) | (BITS(i, 11, 8) << 1);      \
+  }while(0)
+```
+
+- `J-imm`
+这个与`B-imm`是同理的.
+> The offset is sign-extended and added to the **address of the jump instruction** to form the jump target address. Jumps can therefore target a ±1 MiB range. JAL stores the address of the instruction following the jump ('pc'+4) into register rd
+
+```c
+#define immJ()                                                  \
+do {                                                            \
+*imm = SEXT((BITS(i, 31, 31) << 20) | (BITS(i, 19, 12) << 12) | \
+	(BITS(i, 20, 20) << 11) | (BITS(i, 30, 21) << 1),21);       \
+} while (0)
+```
+
+
 
 #### 符号位扩展
 ```cpp
@@ -92,6 +138,70 @@ Disassembly of section .text:
 > 这里读了很多手册, 一直在找低一个`li`指令, 首先我们发现这是一个伪指令, 然后那么就在想, 伪指令的编码是什么 ? 但是最后一直没有找到伪指令的编码, 因为伪指令是汇编器的内容, 然后汇编器来转换为真实指令. 
 > 
 > 其实到这里应该明白了, 但是我还是在糊涂, 总不可能我一个模拟`cpu`执行的人来做伪指令的任务吧 ? 所以说伪指令本来就没有编码, 汇编的时候其实已经直接转变为真实指令了. 所以这里`li`指令的实现
+
+
+1. `addi/slti` etc
+`li`, 通常这个指令会被转换为`addi`以及`auipc`, 因此我们只需要实现这两个. 
+我们验证一下: `0x0000_0413`恰好就是`addi`的编码, 对应寄存器`s0`就是`8`号寄存器. 因此我们先实现`addi` 即可. 
+
+`addi`属于`I-type`. 
+执行: `rs1 + (sext)imm12 -> rd`
+> ADDI adds the sign-extended 12-bit immediate to register rs1. Arithmetic overflow is ignored and the result is simply the low XLEN bits of the result. 
+> 
+> ADDI rd, rs1, 0 is used to implement the MV rd, rs1 assembler pseudoinstruction. 
+> 
+> SLTI (set less than immediate) places the value 1 in register rd if register rs1 is less than the signextended immediate when both are treated as signed numbers, else 0 is written to rd.
+> 
+   SLTIU is similar but compares the values as unsigned numbers (i.e., the immediate is first sign-extended to XLEN bits then treated as an unsigned number). Note, SLTIU rd, rs1, 1 sets rd to 1 if rs1 equals zero, otherwise sets rd to 0 (assembler pseudoinstruction SEQZ rd, rs). 
+>  
+   ANDI, ORI, XORI are logical operations that perform bitwise AND, OR, and XOR on register rs1 and the sign-extended 12-bit immediate and place the result in rd. Note, XORI rd, rs1, -1 performs a bitwise logical inversion of %%  %%register rs1 (assembler pseudoinstruction NOT rd, rs).
+> 
+> Shifts by a constant are encoded as a specialization of the I-type format. The operand to be shifted is in rs1, and the shift amount is encoded in the lower 5 bits of the I-immediate field. The right shift type is encoded in bit 30. SLLI is a logical left shift (zeros are shifted into the lower bits); SRLI is a logical right shift (zeros are shifted into the upper bits); and SRAI is an arithmetic right shift (the original sign bit is copied into the vacated upper bits).
+> 对于移位直接当作`I-type`就可以, 因为我们只关注低5位. 
+
+> LUI (load upper immediate) is used to build 32-bit constants and uses the U-type format. LUI places the 32-bit U-immediate value into the destination register rd, filling in the lowest 12 bits with zeros.
+
+低12位置0. 
+
+2. `mv`这同样是一个伪指令
+> ADDI rd, rs1, 0 is used to implement the MV rd, rs1 assembler pseudoinstruction.
+
+3. `ret`是一个伪指令, 应该实现`jalr`
+显然属于`J`type
+执行: `rs1 + (sext)imm`
+
+> The indirect jump instruction JALR (jump and link register) uses the I-type encoding. The target address is obtained by adding the sign-extended 12-bit I-immediate to the register rs1, then setting the least-significant bit of the result to zero. The address of the instruction following the jump (pc+4) is written to register rd. Register x0 can be used as the destination if the result is not required.
+
+5. `lw`/`sw` etc
+> Load and store instructions transfer a value between the registers and memory. 
+> 
+> Loads are encoded in the I-type format and stores are S-type. The effective address is obtained by adding register rs1 to the sign-extended 12-bit offset. 
+> 
+> Loads copy a value from memory to register rd. Stores copy the value in register rs2 to memory. 
+> 
+> The LW instruction loads a 32-bit value from memory into rd. LH loads a 16-bit value from memory, then sign-extends to 32-bits before storing in rd. LHU loads a 16-bit value from memory but then zero extends to 32-bits before storing in rd. LB and LBU are defined analogously for 8-bit values. The SW, SH, and SB instructions store 32-bit, 16-bit, and 8-bit values from the low bits of register rs2 to memory.
+
+6. `beq/bne/blt` etc这其中还有伪指令`beqz`等等
+>Branch instructions compare two registers. BEQ and BNE take the branch if registers rs1 and rs2 are equal or unequal respectively. BLT and BLTU take the branch if rs1 is less than rs2, using signed and unsigned comparison respectively. BGE and BGEU take the branch if rs1 is greater than or equal to rs2, using signed and unsigned comparison respectively. Note, BGT, BGTU, BLE, and BLEU can be synthesized by reversing the operands to BLT, BLTU, BGE, and BGEU, respectively
+
+>The 12-bit B-immediate encodes signed offsets in multiples of 2 bytes. The offset is sign-extended and added to the **address of the branch instruction** to give the target address. The conditional branch range is ±4 KiB.
+
+7. `add/sub` etc
+>ADD performs the addition of rs1 and rs2. SUB performs the subtraction of rs2 from rs1. Overflows are ignored and the low XLEN bits of results are written to the destination rd. 
+>
+>SLT and SLTU perform signed and unsigned compares respectively, writing 1 to rd if rs1 < rs2, 0 otherwise. Note, SLTU rd, x0, rs2 sets rd to 1 if rs2 is not equal to zero, otherwise sets rd to zero (assembler pseudoinstruction SNEZ rd, rs). 
+>
+>AND, OR, and XOR perform bitwise logical operations. 
+>
+>SLL, SRL, and SRA perform logical left, logical right, and arithmetic right shifts on the value in register rs1 by the shift amount held in the lower 5 bits of register rs2
+
+ 7. `REM/MULT/DIV`
+>  MUL performs an XLEN-bit×XLEN-bit multiplication of rs1 by rs2 and places the lower XLEN bits in the destination register. MULH, MULHU, and MULHSU perform the same multiplication but return the upper XLEN bits of the full 2×XLEN-bit product, for signed×signed, unsigned×unsigned, and rs1×unsigned rs2 multiplication, respectively.
+> 
+> If both the high and low bits of the same product are required, then the recommended code sequence is: MULH[[S]U] rdh, rs1, rs2; MUL rdl, rs1, rs2 (source register specifiers must be in same order and rdh cannot be the same as rs1 or rs2). Microarchitectures can then fuse these into a single multiply operation instead of performing two separate multiplies.
+> 
+> DIV and DIVU perform an XLEN bits by XLEN bits signed and unsigned integer division of rs1 by rs2, rounding towards zero. REM and REMU provide the remainder of the corresponding division operation. For REM, the sign of a nonzero result equals the sign of the dividend.
+
 
 ### Decode结构
 
