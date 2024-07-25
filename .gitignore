@@ -13,5 +13,5 @@
 /am-kernels
 
 !/notes/*
-!/notes/assets/
+!/notes/assets/*
 /notes/.obsidian/
