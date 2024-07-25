@@ -293,7 +293,7 @@ static int find_main_op(int const p, int const q) {
   return pos;
 }
 
-static word_t _algo_dual_calc(int const tk, word_t val1, word_t val2,
+static word_t _arith_dual_calc(int const tk, word_t val1, word_t val2,
                               bool *success) {
   Assert(binary_operator(tk), "Not biniary operator");
   word_t res = 0;
@@ -428,9 +428,9 @@ static word_t expr_eval(char const *const expr, int _p, int _q,
     word_t const val1 = expr_eval(expr, p, main_op_pos - 1, success);
     word_t const val2 = expr_eval(expr, main_op_pos + 1, q, success);
 
-    word_t const algo_res = _algo_dual_calc(main_op_type, val1, val2, success);
+    word_t const arith_res = _arith_dual_calc(main_op_type, val1, val2, success);
 
-    return algo_res;
+    return arith_res;
   }
 }
 
