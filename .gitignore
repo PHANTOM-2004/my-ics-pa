@@ -11,3 +11,6 @@
 !init.sh
 /fceux-am
 /am-kernels
+
+!/notes/*
+notes/.obsidian/
