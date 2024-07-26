@@ -87,7 +87,8 @@ void free_wq(WP *wp) {
 
   /*delete from head*/
   bool find = false;
-  for (WP *p = head->next; p != NULL; p = p->next) {
+  // we need p->next, so cannot start from p->head
+  for (WP *p = head; p != NULL; p = p->next) {
     if (p->next == wp) {
       p->next = p->next->next;
       find = true;
