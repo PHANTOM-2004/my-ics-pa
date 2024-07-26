@@ -63,7 +63,7 @@ gs             0x0                 0
     // we use word_t here
     // 32/8 = 4
     word_t const cur_reg = gpr(i);
-    printf("RegID: %2d RegName: %-10s Content: " FMT_WORD, i, reg_name(i),
+    printf("R%02d\t %-5s\t HEX: " FMT_WORD, i, reg_name(i),
            cur_reg);
     // TODO: we need to use bit rather than pointer
     word_t const MASK0 = 0xff;
@@ -76,7 +76,7 @@ gs             0x0                 0
     uint8_t const R2 = (uint8_t)((MASK2 & cur_reg) >> 16);
     uint8_t const R3 = (uint8_t)((MASK3 & cur_reg) >> 24);
 
-    printf("\tDetailed: ");
+    printf("\tBINARY: ");
     print_byte(R3);
     printf(" ");
     print_byte(R2);

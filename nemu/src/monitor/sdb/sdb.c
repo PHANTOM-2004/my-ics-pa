@@ -198,7 +198,7 @@ static int cmd_x(char *args) {
     return 0;
   } // prediction
 
-  for (word_t pos = addr; pos < addr + _number; pos++) {
+  for (word_t pos = addr; pos < addr + _number; pos+=4) {
     // each time a word
     word_t const value = paddr_read(pos, 4);
     printf(FMT_WORD ":\t\t" FMT_WORD "\n", pos, value);

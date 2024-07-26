@@ -177,6 +177,7 @@ static bool make_token(char *e) {
           }
           tokens[nr_token].type = rules[i].token_type;
           strncpy(tokens[nr_token].str, substr_start, substr_len);
+          tokens[nr_token].str[substr_len] = '\0';
           break;
 
         case TK_INT_DEC:
@@ -192,6 +193,7 @@ static bool make_token(char *e) {
           tokens[nr_token].type = rules[i].token_type;
           int const cpy_len = substr_len < 10 ? substr_len : 10;
           strncpy(tokens[nr_token].str, substr_start, cpy_len);
+          tokens[nr_token].str[cpy_len] = '\0';
           break;
 
         default:
