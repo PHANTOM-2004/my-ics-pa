@@ -203,6 +203,17 @@ Disassembly of section .text:
 > DIV and DIVU perform an XLEN bits by XLEN bits signed and unsigned integer division of rs1 by rs2, rounding towards zero. REM and REMU provide the remainder of the corresponding division operation. For REM, the sign of a nonzero result equals the sign of the dividend.
 
 
+***这里也是有一个大坑呀, 只能说还好俺的基础知识比较牢固***
+假如想做`64bit`乘法, 下面这么写是错的, 仔细想想
+```c
+  INSTPAT("0000001 ????? ????? 001 ????? 0110011", mulh, R,
+R(rd) = (word_t)BITS((int64_t)src1 * (int64_t)src2, 63, 32));
+```
+这样写才是对的, 思考如何完成符号扩展. 
+```c
+  INSTPAT("0000001 ????? ????? 001 ????? 0110011", mulh, R,
+R(rd) = (word_t)BITS((int64_t)(sword_t)src1 * (int64_t)(sword_t)src2, 63, 32));
+```
 ### Decode结构
 
 ```c
@@ -370,3 +381,180 @@ INSTPAT("??????? ????? ????? ??? ????? 00101 11", auipc  , U, R(rd) = s->pc + im
 }
 ```
 
+
+-- --
+
+
+
+## Abstract Machine
+
+```
+AM = TRM + IOE + CTE + VME + MPE
+```
+
+- TRM(Turing Machine) - 图灵机, 最简单的运行时环境, 为程序提供基本的计算能力
+- IOE(I/O Extension) - 输入输出扩展, 为程序提供输出输入的能力
+- CTE(Context Extension) - 上下文扩展, 为程序提供上下文管理的能力
+- VME(Virtual Memory Extension) - 虚存扩展, 为程序提供虚存管理的能力
+- MPE(Multi-Processor Extension) - 多处理器扩展, 为程序提供多处理器通信的能力 (MPE超出了ICS课程的范围, 在PA中不会涉及)
+
+> `volatile` 关键字:  用于声明变量的值可能会在没有明显原因的情况下发生变化。这告诉编译器不要对这样的变量进行优化，即使编译器无法检测到该变量是如何改变的。实际上可能这个变量被硬件改变, 或者多线程中, 或者被其他某种方式改变, 不希望他被优化掉. 
+
+
+### Makfile的阅读
+
+####  `.DEFAULTGOAL/MAKECOMMANDGOALS`
+这两个是`make`预定义的变量, 在没有目标的时候会默认创建前者, 当然我们可以自己指定前者, 这样就直接使用了我们制定的值. 后者就是命令行传递过来的目标. 
+
+```makefile
+ifeq ($(MAKECMDGOALS),)
+  MAKECMDGOALS  = image
+  .DEFAULT_GOAL = image
+endif
+
+### Override checks when `make clean/clean-all/html`
+ifeq ($(findstring $(MAKECMDGOALS),clean|clean-all|html),)
+
+```
+
+#### `findstring`
+> Searches _in_ for an occurrence of _find_. If it occurs, the value is _find_; otherwise, the value is empty. You can use this function in a conditional to test for the presence of a specific substring in a given string. Thus, the two examples,
+
+#### `addprefix`
+
+```makefile
+OBJS      = $(addprefix $(DST_DIR)/, $(addsuffix .o, $(basename $(SRCS))))
+
+这里首先是每个文件的`basename + .o`, 然后再在这些文件前面加上目标地址, 这样就得到了`OBJS`的全部地址. 
+```
+
+
+#### 组织目标位置
+这里主要是字符串处理的方法
+```makefile
+### Collect the files to be linked: object files (`.o`) and libraries (`.a`)
+OBJS      = $(addprefix $(DST_DIR)/, $(addsuffix .o, $(basename $(SRCS))))
+
+LIBS     := $(sort $(LIBS) am klib) 
+# lazy evaluation ("=") causes infinite recursions
+
+LINKAGE   = $(OBJS) \
+  $(addsuffix -$(ARCH).a, $(join \
+    $(addsuffix /build/, $(addprefix $(AM_HOME)/, $(LIBS))), \
+    $(LIBS) ))
+```
+
+### AM中调用NEMU可以直接执行而不`sdb`
+我们关注这部分即可, 取决于宏`CONFIG_TARGET_AM`, 也就是说`make`的时候定义这个宏. 实际上在`menuconfig`里面也是有的, 但是上面写了`don't select`, 可能是正常`make nemu`还是不用这个宏的. 
+```c
+void engine_start() {
+#ifdef CONFIG_TARGET_AM
+  cpu_exec(-1);
+#else
+  /* Receive commands from user. */
+  sdb_mainloop();
+#endif
+}
+```
+
+```makefile
+### Paste in arch-specific configurations (e.g., from `scripts/x86_64-qemu.mk`)
+
+-include $(AM_HOME)/scripts/$(ARCH).mk
+```
+我们看到这里包含了`ISA-PLATFORM`的配置. 
+
+```makefile
+include $(AM_HOME)/scripts/isa/riscv.mk
+include $(AM_HOME)/scripts/platform/nemu.mk
+CFLAGS  += -DISA_H=\"riscv/riscv.h\"
+COMMON_CFLAGS += -march=rv32im_zicsr -mabi=ilp32   # overwrite
+LDFLAGS       += -melf32lriscv                     # overwrite
+
+AM_SRCS += riscv/nemu/start.S \
+           riscv/nemu/cte.c \
+           riscv/nemu/trap.S \
+           riscv/nemu/vme.c
+```
+这其中还包含了`nemu`的配置, 因此如果我们希望定义上文的宏, 需要在`nemu.mk`中做文章. 
+
+```makefile
+run: image
+$(MAKE) -C $(NEMU_HOME) ISA=$(ISA) run ARGS="$(NEMUFLAGS)" IMG=$(IMAGE).bin
+```
+
+***非常可惜, 我的想法是错误的***.  
+> 我忽略了讲义中的<u>批处理模式</u>. 实际上经过寻找, 只需改变运行时参数即可, 并不需要改变编译参数, 并不是上面所说的宏. 而是直接传一个参数`--batch` , 下面的方式才是<u>正解</u>. 
+
+```makefile
+# $(AM_HOME)/scripts/platform/nemu.mk:27
+
+run: image
+	$(MAKE) -C $(NEMU_HOME) ISA=$(ISA) run ARGS="$(NEMUFLAGS) --batch" IMG=$(IMAGE).bin
+```
+
+
+### 一些的其他问题
+使用`bear`的时候给我报了依托`warning`. 这个问题在上游还没有解决. 我去`google`找了一下, 具体可以看: [grpc-cross-language-bug](https://github.com/grpc/grpc/issues/37178)
+
+### 如何`make klib`
+这次文档不教了, 看看`makefile`.
+```makefile
+ make archive ARCH=riscv32-nemu
+```
+
+### 实现`string.c`
+> 这部分就当学习了, 再次像高程那样瞎几把循环是没有意义的. 因此看一看
+> [glibc](https://codebrowser.dev/glibc/glibc/string/memcpy.c.html)的实现方式. 
+
+
+> 我们这里约定, 实际上`glibc`也是一样的, 不能接受空指针. 
+
+- `strcpy` 
+>  `stpcpy()`: This function returns a pointer to the terminating null byte of the copied string. 这个东西会把最后的`'\0'` 拷贝过去. 
+
+- `strncpy`
+> DESCRIPTION
+       These functions copy non-null bytes from the string pointed to by src into the array pointed to by dst.  
+       If the source has too few non-null bytes to fill the destination, the functions pad the destination with trailing null bytes.  
+       If the destination buffer, limited by its size, isn't large enough to hold the copy, the resulting character sequence is truncated.  
+
+> RETURN VALUE
+       strncpy()
+              returns dst.
+              
+- `strcat`
+ > `strcat()` These functions return dst.
+ 
+- memcpy
+> DESCRIPTION
+       The memcpy() function copies n bytes from memory area src to memory area dest.  The memory areas must not overlap.  Use memmove(3) if the memory areas do overlap.
+ > The memcpy() function returns a pointer to dest.
+ 
+> 根据`glibc`, 这里的主要思想还是首先拷贝`byte`对齐, 然后按照`page`拷贝, 最后拷贝`word`. 
+
+- `memset`
+>DESCRIPTION
+       The memset() function fills the first n bytes of the memory area pointed to by s with the constant byte c.
+> 
+> RETURN VALUE
+       The memset() function returns a pointer to the memory area s.
+
+- `memmove`
+> ESCRIPTION
+       The  memmove() function copies n bytes from memory area src to memory area dest.  The memory areas may overlap: copying takes place as though the bytes in src are first copied into a temporary array that does not over‐
+       lap src or dest, and the bytes are then copied from the temporary array to dest.
+> %%  %%
+> RETURN VALUE
+       The memmove() function returns a pointer to dest.
+
+- `memcmp`
+> DESCRIPTION
+       The memcmp() function compares the first n bytes (each interpreted as unsigned char) of the memory areas s1 and s2.
+> 
+> RETURN VALUE
+       The memcmp() function returns an integer less than, equal to, or greater than zero if the first n bytes of s1 is found, respectively, to be less than, to match, or be greater than the first n bytes of s2.
+> 
+>     For a nonzero return value, the sign is determined by the sign of the difference between the first pair of bytes (interpreted as unsigned char) that differ in s1 and s2.
+> 
+       If n is zero, the return value is zero.
