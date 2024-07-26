@@ -63,7 +63,7 @@ static struct rule {
     {"\\*", TK_DEREF}, // actually it useless here,
     {"!=", TK_UNEQ},
     {"&&", TK_LAND},
-    {"\\$(0|[12][0-9]|3[01])", TK_REG},
+    //{"\\$(0|[12][0-9]|3[01])", TK_REG},
     {"\\$0|ra|sp|gp|tp|t[0-6]|s[01]|a[0-7]|s[2-9]|s1[01]", TK_REG},
 };
 
@@ -94,7 +94,6 @@ static char const *op_type_to_str(int const op_type) {
     return "!=";
 
   default:
-    TODO();
     return NULL;
   }
 }
@@ -135,6 +134,7 @@ static bool make_token(char *e) {
 
   nr_token = 0;
 
+  Log("make token for: %s", e);
   while (e[position] != '\0') {
     /* Try all rules one by one. */
     for (i = 0; i < NR_REGEX; i++) {
@@ -207,6 +207,7 @@ static bool make_token(char *e) {
       printf("no match at position %d\n%s\n%*.s^\n", position, e, position, "");
       return false;
     }
+    Log("total tokens : %d", nr_token);
   }
 
   return true;
@@ -294,7 +295,7 @@ static int find_main_op(int const p, int const q) {
 }
 
 static word_t _arith_dual_calc(int const tk, word_t val1, word_t val2,
-                              bool *success) {
+                               bool *success) {
   Assert(binary_operator(tk), "Not biniary operator");
   word_t res = 0;
   switch (tk) {
@@ -364,6 +365,11 @@ static word_t get_tk_number(int const p, bool *success) {
 static word_t expr_eval(char const *const expr, int _p, int _q,
                         bool *const success) {
   // we need to trim ()
+  if(!*success || _p > _q ){
+    *success = false;
+    return 0;
+  }
+
   Log("before: p%d, q:%d", _p, _q);
   while (tokens[_p].type == TK_NOTYPE)
     ++_p;
@@ -407,6 +413,11 @@ static word_t expr_eval(char const *const expr, int _p, int _q,
       return 0;
     }
     int const main_op_type = tokens[main_op_pos].type;
+    if(!binary_operator(main_op_type)){
+      Log("[SYNTAX ERROR] invalid expression");
+      *success = false;
+      return 0;
+    }
     Log("main op: %s", op_type_to_str(main_op_type));
 
     // special for deref *, if there is deref,
@@ -428,7 +439,8 @@ static word_t expr_eval(char const *const expr, int _p, int _q,
     word_t const val1 = expr_eval(expr, p, main_op_pos - 1, success);
     word_t const val2 = expr_eval(expr, main_op_pos + 1, q, success);
 
-    word_t const arith_res = _arith_dual_calc(main_op_type, val1, val2, success);
+    word_t const arith_res =
+        _arith_dual_calc(main_op_type, val1, val2, success);
 
     return arith_res;
   }

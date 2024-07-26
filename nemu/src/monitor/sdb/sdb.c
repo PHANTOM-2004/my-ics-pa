@@ -119,32 +119,32 @@ static int cmd_q(char *args) {
 }
 
 static int cmd_p(char *args) {
-  char *const _str = strtok(NULL, " ");
-  if (_str == NULL) {
+  if (args == NULL || !strlen(args)) {
     Log(CMD_ERROR_OUTPUT_FMT, "p", "no expression");
     return 0;
   }
+  Log("cmd_p: %s", args);
 
   bool success = true;
-  word_t const res = expr(_str, &success);
+  word_t const res = expr(args, &success);
   if (!success) {
-    Log(CMD_ERROR_OUTPUT_FMT, "q", "invalid expression");
-    return -1;
+    Log(CMD_ERROR_OUTPUT_FMT" : [%s]", "p", "invalid expression", args);
+    return 0;
   }
 
-  printf("[ %s ] = " FMT_WORD "\n", _str, res);
+  printf("[%s] = " FMT_WORD "\n", args, res);
 
   return 0;
 }
 
 static int cmd_w(char *args) {
-  char *_expr = strtok(NULL, " ");
-  if (_expr == NULL || !strlen(_expr)) {
+  if (args == NULL || !strlen(args)) {
     Log(CMD_ERROR_OUTPUT_FMT, "w", "no expression");
     return 0;
   }
+  Log("cmd_w: %s", args);
 
-  int const res = wp_insert(_expr);
+  int const res = wp_insert(args);
   return res;
 }
 
@@ -167,7 +167,7 @@ static int cmd_x(char *args) {
   // parse the args, needed N and expr.
   // need to be done after calculation of EXPR
   // printf("%s\n", args);
-  char const *_str_number = strtok(NULL, " ");
+  char * const _str_number = strtok(NULL, " ");
   if (_str_number == NULL) {
     Log(CMD_ERROR_OUTPUT_FMT, "x", "lack of number");
     return 0;
@@ -178,7 +178,7 @@ static int cmd_x(char *args) {
   }
   int const _number = atoi(_str_number);
 
-  char *const _expr = strtok(NULL, " ");
+  char *const _expr = _str_number + strlen(_str_number) + 1;
   if (_expr == NULL || !strlen(_expr)) {
     Log(CMD_ERROR_OUTPUT_FMT, "x", "lack of expression");
     return 0;
@@ -187,7 +187,7 @@ static int cmd_x(char *args) {
   bool success = true;
   word_t const addr = expr(_expr, &success);
   if (success == false) {
-    Log(CMD_ERROR_OUTPUT_FMT, "x", "invalid expression");
+    Log(CMD_ERROR_OUTPUT_FMT" : [%s]", "x", "invalid expression", _expr);
     return 0;
   }
 

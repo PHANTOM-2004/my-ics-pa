@@ -96,6 +96,8 @@ static void decode_operand(Decode *s, int *rd, word_t *src1, word_t *src2,
     src1R();
     src2R();
     break;
+  case TYPE_N:
+    break;
   default:
     Log("unknown type %d", type);
   }
