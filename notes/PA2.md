@@ -486,6 +486,7 @@ $(MAKE) -C $(NEMU_HOME) ISA=$(ISA) run ARGS="$(NEMUFLAGS)" IMG=$(IMAGE).bin
 ***非常可惜, 我的想法是错误的***.  
 > 我忽略了讲义中的<u>批处理模式</u>. 实际上经过寻找, 只需改变运行时参数即可, 并不需要改变编译参数, 并不是上面所说的宏. 而是直接传一个参数`--batch` , 下面的方式才是<u>正解</u>. 
 
+> 至于我是怎么发现的呢? 因为我突然想到`batch`了, 在项目中我记得我见到过. 因此我在项目目录下面`grep`了一下. 
 ```makefile
 # $(AM_HOME)/scripts/platform/nemu.mk:27
 
@@ -558,3 +559,323 @@ run: image
 >     For a nonzero return value, the sign is determined by the sign of the difference between the first pair of bytes (interpreted as unsigned char) that differ in s1 and s2.
 > 
        If n is zero, the return value is zero.
+
+### 实现`stdio.h`
+
+参考这篇[文章](https://www.cprogramming.com/tutorial/c/lesson17.html)
+
+#### `va_list`
+这是一颗可以存放任意一个变量的类型. 
+
+#### `va_start`
+配合`va_list`食用. 
+```c
+int a_function ( int x, ... )
+{
+    va_list a_list;
+    va_start( a_list, x );
+}
+```
+> va_start is a macro which accepts two arguments, a va_list and the name of the variable that directly precedes the ellipsis ("...")
+
+因此这里面使用的是`x`作为参数. 
+
+#### `va_arg`
+`double` `average (` `int` `num, ... )`
+```c
+
+double average(int const num , ...){
+	va_list arguments;
+	double sum = 0;
+
+	va_start(arguments, num);
+	for(int i = 0; i < num ;i++){
+		sum += va_arg(arguments, double); // treat as double
+	}
+	va_end(arguments);//clear list
+}
+```
+
+## `itrace`
+
+### `iringbuf`
+
+首先是实现环型缓冲区, 这里我们阅读源代码发现: 
+```c
+//src/cpu/cpu-exec.c
+
+void assert_fail_msg() {
+  isa_reg_display();
+  statistic();
+}
+```
+
+这部分会在执行失败的时候调用, 实际上也就是`Assert`失败的时候调用, 因此这也就是我们打印环形缓冲区的时机. 
+
+然后便是`trace`的时机, 这个也比较明显, 我们找到`trace_and_difftest`. 每条指令结束之后都会执行这一句,  实际上调用这个指令的时候, 上一条指令已经执行结束并且`cpu.pc=s->dnpc`. 最新指向的是还没有执行的指令. 但这是没关系的, 因为下一步就是执行这个指令, 在这个指令执行的过程中`Assert`失败的话, 那么显然就是该指令. 因此我们把定位箭头指向缓冲区中最新的指令即可. 
+
+> 再仔细观察, 可以发现文档中给的参考案例是16条. 一条`pc+instr`一共占用`8`字节, 然后`Decode`中的`log_buf`刚好就是`128`字节. 然而我们并不能直接用这个`log_buf`. 我们需要单独的区域来存储所有信息. 我想错了. 
+
+这里学会善用`menuconfig`, 我们加一个选项制定`iringbuf`相关信息
+```konfig
+config ITRACE_RINGBUF_ON
+  depends on ITRACE
+  bool "Enable ringbuffer trace"
+  default y
+ 
+config ITRACE_RINGBUF_SIZE
+  depends on ITRACE_RINGBUF_ON
+  int "Valid when trace enabled; set the number of instruction in ringbuffer"
+  default 16
+```
+
+## `mtrace`
+
+`mtrace`的实现就更显然了, 我们只需要在访存的部分实现记录即可. 
+```konfig
+config MTRACE
+  depends on TRACE && TARGET_NATIVE_ELF && ENGINE_INTERPRETER
+  bool "Enable memory tracer"
+  default n
+
+config MTRACE_READ
+  depends on MTRACE
+  bool "Enable memory read tracer"
+  default y
+
+config MTRACE_WRITE
+  depends on MTRACE
+  bool "Enable memory write tracer"
+  default y
+```
+
+## `ftrace`
+
+> 消失的符号, 说实话这个太明显了. 只需知道预处理已经预处理掉了即可. 
+
+### 前奏: `readelf`
+
+`elf`符号表中的信息很有意思. 我们可以对比着来看, 既然追踪函数调用, 那么只需关注<u>符号表中</u>类型为`FUNC`的部分: 
+```shell
+riscv64-linux-gnu-readelf -a add-riscv32-nemu.elf | grep FUNC
+```
+我们得到
+```
+Num:    Value  Size Type    Bind   Vis      Ndx Name
+ 16: 80000100    32 FUNC    GLOBAL HIDDEN     1 _trm_init
+ 25: 80000010    24 FUNC    GLOBAL HIDDEN     1 check
+ 27: 80000000     0 FUNC    GLOBAL DEFAULT    1 _start
+ 29: 80000028   204 FUNC    GLOBAL HIDDEN     1 main
+ 33: 800000f4    12 FUNC    GLOBAL HIDDEN     1 halt
+```
+然后我们对照着反汇编得到结果, 先过滤一下得到: 
+```shell
+cat ./add-riscv32-nemu.txt | grep -E "^[0-9a-f]{8} <.+>:"
+```
+得到: 
+```
+80000000 <_start>:  
+80000010 <check>:  
+80000028 <main>:  
+800000f4 <halt>:  
+80000100 <_trm_init>:
+```
+我们发现地址都是对应的. 
+
+
+但`readelf`输出的信息是已经经过解析的, 实际上符号表中`Name` 属性存放的是字符串在字符串表(`string table`)中的偏移量. 为了查看字符串表, 我们先查看`readelf`输出中`Section Headers`的信息:
+
+```
+Section Headers:
+  [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al
+  [ 0]                   NULL            00000000 000000 000000 00      0   0  0
+  [ 1] .text             PROGBITS        80000000 001000 000120 00  AX  0   0  4
+  [ 2] .srodata.mainargs PROGBITS        80000120 001120 000001 00   A  0   0  4
+  [ 3] .data.ans         PROGBITS        80000124 001124 000100 00  WA  0   0  4
+  [ 4] .data.test_data   PROGBITS        80000224 001224 000020 00  WA  0   0  4
+  [ 5] .comment          PROGBITS        00000000 001244 000012 01  MS  0   0  1
+  [ 6] .riscv.attributes RISCV_ATTRIBUTE 00000000 001256 000033 00      0   0  1
+  [ 7] .symtab           SYMTAB          00000000 00128c 000230 10      8  16  4
+  [ 8] .strtab           STRTAB          00000000 0014bc 0000c5 00      0   0  1
+  [ 9] .shstrtab         STRTAB          00000000 001581 000068 00      0   0  1
+Key to Flags:
+  W (write), A (alloc), X (execute), M (merge), S (strings), I (info),
+  L (link order), O (extra OS processing required), G (group), T (TLS),
+  C (compressed), x (unknown), o (OS specific), E (exclude),
+  D (mbind), p (processor specific)
+```
+我们希望找的是字符串表`strtab`. 
+
+我们使用`xxd`查看对应的`elf`文件. 
+![](assets/Pasted%20image%2020240727150942.png)
+观察到`0x14bc`开始对应的就是字符串.  
+
+> 符号表中的偏移量, 记录的是
+
+> 有一个篮框的`hello world`, 这里竟然也踩到一个坑. `readelf`自动截断, 需要加上`-W`参数.[参考](https://stackoverflow.com/questions/15362297/why-i-am-getting-this-output-when-run-readelf-s)
+> 其实已经猜到了, 在`readelf`读符号表头的时候, 得到偏移量`0x3038`, 然后进去找, 找到的都是函数相关的符号字符串. 并没有找到`hello world`. 我想应该是放在了静态存储区中
+```
+00002000: 0100 0200 4865 6c6c 6f20 576f 726c 6400  ....Hello World.
+```
+实际上只需要关注符号表: 
+```
+[16] .rodata        PROGBITS        0000000000002000 002000 000010 00   A  0   0  4
+```
+这是`readonly data`. 恰好就是`Hello World`放的地方. 
+
+
+### 实现`ftrace`
+
+#### 参数解析
+```
+getopt_long() and getopt_long_only()
+       The getopt_long() function works like getopt() except that it also accepts long options, started with two dashes.  (If the program accepts only long options, then optstring should be specified as an empty string  (""), not NULL.)  Long option naimes may be abbreviated if the abbreviation is unique or is an exact match for some defined option.  A long option may take a parameter, of the form --arg=param or --arg param.
+
+optstring is a string containing the legitimate option characters.  A legitimate option character is any visible one byte ascii(7) character (for which isgraph(3) would return nonzero) that is not '-', ':', or ';'.  
+
+If such a character is followed by a colon, the option requires an argument(注意这里), so getopt() places a pointer to the following text in the same argv-element, or the text of the following argv-element, in optarg. 
+```
+
+我们可以参照`makefile`中的用法
+```makefile
+IMG ?=
+NEMU_EXEC := $(BINARY) $(ARGS) $(IMG)
+```
+以及
+```makefile
+NEMUFLAGS += -l $(shell dirname $(IMAGE).elf)/nemu-log.txt 
+```
+说实话找了很多文档我没找到那个`case 1`是怎么来的, 什么时候会返回`1`.  
+
+但是应该不影响我们实现`--elf`选项. 这个同理于前面几个选项. 我们需要配合更改`makefile`传递这个参数. 
+
+```makefile
+# $AM_HOME/scripts/platform/nemu.mk
+
+run: image
+	$(MAKE) -C $(NEMU_HOME) ISA=$(ISA) run ARGS="$(NEMUFLAGS) --batch 
+	-e $(IMAGE).elf" IMG=$(IMAGE).bin
+```
+
+剩下的工作就是读这个文件了, 参数解析完毕. 
+
+
+#### 解析`elf`
+首先观察`readelf`读的符号表
+```
+Symbol table '.symtab' contains 24 entries:  
+  Num:    Value          Size Type    Bind   Vis      Ndx Name  
+	...
+    8: 0000000000004008     0 NOTYPE  WEAK   DEFAULT   24 data_start  
+    9: 0000000000000000     0 FUNC    GLOBAL DEFAULT  UND puts@GLIBC_2.2.5  
+   10: 0000000000004018     0 NOTYPE  GLOBAL DEFAULT   24 _edata  
+   11: 0000000000001154     0 FUNC    GLOBAL HIDDEN    15 _fini  
+   12: 0000000000004008     0 NOTYPE  GLOBAL DEFAULT   24 __data_start  
+   13: 0000000000000000     0 NOTYPE  WEAK   DEFAULT  UND __gmon_start__  
+   14: 0000000000004010     0 OBJECT  GLOBAL HIDDEN    24 __dso_handle  
+   15: 0000000000002000     4 OBJECT  GLOBAL DEFAULT   16 _IO_stdin_used  
+   16: 0000000000004020     0 NOTYPE  GLOBAL DEFAULT   25 _end  
+   17: 0000000000001040    38 FUNC    GLOBAL DEFAULT   14 _start  
+   18: 0000000000004018     0 NOTYPE  GLOBAL DEFAULT   25 __bss_start  
+   19: 0000000000001139    26 FUNC    GLOBAL DEFAULT   14 main  
+   20: 0000000000004018     0 OBJECT  GLOBAL HIDDEN    24 __TMC_END__  
+```
+
+我们参考[解析elf](https://stackoverflow.com/questions/23809102/print-the-symbol-table-of-an-elf-file), 但是这个使用了`libelf`, 我还是自己写吧. 
+
+```c
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <libelf.h>
+#include <gelf.h>
+
+int main(int argc, char **argv)
+{
+    Elf         *elf;
+    Elf_Scn     *scn = NULL;
+    GElf_Shdr   shdr;
+    Elf_Data    *data;
+    int         fd, ii, count;
+
+    elf_version(EV_CURRENT);
+
+    fd = open(argv[1], O_RDONLY);
+    elf = elf_begin(fd, ELF_C_READ, NULL);
+
+    while ((scn = elf_nextscn(elf, scn)) != NULL) {
+        gelf_getshdr(scn, &shdr);
+        if (shdr.sh_type == SHT_SYMTAB) {
+            /* found a symbol table, go print it. */
+            break;
+        }
+    }
+
+    data = elf_getdata(scn, NULL);
+    count = shdr.sh_size / shdr.sh_entsize;
+
+    /* print the symbol names */
+    for (ii = 0; ii < count; ++ii) {
+        GElf_Sym sym;
+        gelf_getsym(data, ii, &sym);
+        printf("%s\n", elf_strptr(elf, shdr.sh_link, sym.st_name));
+    }
+    elf_end(elf);
+    close(fd);
+}
+```
+
+首先关注一个标准的`elf`头:
+![](assets/Pasted%20image%2020240727173729.png)
+我们希望得到`section`的信息, 这里可以直接从`elf`头读出. 根据文档, <u>如果没有section header, 那么偏移量就是0</u>. 
+因此第一步就是解析elf头
+
+解析来解析`section header`. 
+- `number of section headers`: 这个说的就是`section header`一共有几条
+- `section header string table index`: 这个有点意思, 意思就是`string table`在`section header`中的索引
+- `size of section header`, 这个容易引起歧义:
+```
+ e_shentsize: This member holds a sections header's size in bytes.  A section header is one entry in the section header table; all entries are the same size.
+```
+> 实际上一个`section header` 大小是图片的`64`, 而一个`section header table`是由多个`header`构成的. 
+![](assets/Pasted%20image%2020240727181254.png)
+比如这个图是`32-bit`的, 那么刚好这里`40`就是我们结构体的大小. 
+
+<u>这里也是吃了个大亏,  没有好好看手册, 这里得到`info`是不能直接得到的, 需要宏来解绑. </u>
+```c
+//There are macros for packing and unpacking the binding and type fields:
+
+              ELF32_ST_BIND(info)
+              ELF64_ST_BIND(info)
+                     Extract a binding from an st_info value.
+
+              ELF32_ST_TYPE(info)
+              ELF64_ST_TYPE(info)
+                     Extract a type from an st_info value.
+
+              ELF32_ST_INFO(bind, type)
+              ELF64_ST_INFO(bind, type)
+                     Convert a binding and a type into an st_info value.
+
+```
+
+
+### `function`对应`name`
+> 思路如下: 
+- 如果给定一个地址, 那么我们就扫描整个符号表中所有`Type=FUNC`的条目.
+- 检查这个地址是否处于`[Value, Value + Size)`这个区间里面, 如果是的, 说明就是这个函数. 
+
+
+
+#### `menuconfig`
+```konfig
+config FTRACE
+  depends on TRACE && TARGET_NATIVE_ELF && ENGINE_INTERPRETER
+  bool "Enable function call tracer"
+  default y
+```
+#### 传递给`nemu`一个`elf`文件
+```
+```
+

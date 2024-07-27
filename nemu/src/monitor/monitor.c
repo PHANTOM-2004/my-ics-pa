@@ -16,6 +16,12 @@
 #include <isa.h>
 #include <memory/paddr.h>
 
+#ifdef CONFIG_FTRACE
+extern char *elf_file;
+int init_elf();
+#endif
+
+
 void init_rand();
 void init_log(const char *log_file);
 void init_mem();
@@ -43,7 +49,6 @@ static void welcome() {
 #include <getopt.h>
 
 void sdb_set_batch_mode();
-
 static char *log_file = NULL;
 static char *diff_so_file = NULL;
 static char *img_file = NULL;
@@ -72,16 +77,17 @@ static long load_img() {
 }
 
 static int parse_args(int argc, char *argv[]) {
-  const struct option table[] = {
+  static const struct option table[] = {
       {"batch", no_argument, NULL, 'b'},
       {"log", required_argument, NULL, 'l'},
       {"diff", required_argument, NULL, 'd'},
       {"port", required_argument, NULL, 'p'},
       {"help", no_argument, NULL, 'h'},
+      {"elf", no_argument, NULL, 'e'},
       {0, 0, NULL, 0},
   };
   int o;
-  while ((o = getopt_long(argc, argv, "-bhl:d:p:", table, NULL)) != -1) {
+  while ((o = getopt_long(argc, argv, "-bhl:d:p:e:", table, NULL)) != -1) {
     switch (o) {
     case 'b':
       sdb_set_batch_mode();
@@ -95,6 +101,13 @@ static int parse_args(int argc, char *argv[]) {
     case 'd':
       diff_so_file = optarg;
       break;
+#ifdef CONFIG_FTRACE
+    case 'e':
+      elf_file = optarg;
+      // here log is not initialized
+      printf("[INFO] Get -e option and ELF file: %s\n", elf_file);
+      break;
+#endif
     case 1:
       img_file = optarg;
       return 0;
@@ -104,6 +117,7 @@ static int parse_args(int argc, char *argv[]) {
       printf("\t-l,--log=FILE           output log to FILE\n");
       printf("\t-d,--diff=REF_SO        run DiffTest with reference REF_SO\n");
       printf("\t-p,--port=PORT          run DiffTest with port PORT\n");
+      printf("\t-e,--elf=FILE           input elf format file\n");
       printf("\n");
       exit(0);
     }
@@ -134,6 +148,9 @@ void init_monitor(int argc, char *argv[]) {
 
   /* Load the image to memory. This will overwrite the built-in image. */
   long img_size = load_img();
+
+  /* init elf parser and save function name*/
+  IFDEF(CONFIG_FTRACE, init_elf());
 
   /* Initialize differential testing. */
   init_difftest(diff_so_file, img_size, difftest_port);

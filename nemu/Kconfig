@@ -154,6 +154,45 @@ config ITRACE_COND
   string "Only trace instructions when the condition is true"
   default "true"
 
+config ITRACE_RINGBUF_ON
+  depends on ITRACE
+  bool "Enable ringbuffer trace"
+  default y
+
+config ITRACE_RINGBUF_SIZE
+  depends on ITRACE_RINGBUF_ON
+  int "Valid when trace enabled; set the number of instruction in ringbuffer"
+  default 16
+
+config MTRACE
+  depends on TRACE && TARGET_NATIVE_ELF && ENGINE_INTERPRETER
+  bool "Enable memory tracer"
+  default n
+
+config MTRACE_READ
+  depends on MTRACE
+  bool "Enable memory read tracer"
+  default y
+
+config MTRACE_WRITE
+  depends on MTRACE
+  bool "Enable memory write tracer"
+  default y
+
+config FTRACE
+  depends on TRACE && TARGET_NATIVE_ELF && ENGINE_INTERPRETER
+  bool "Enable function call tracer"
+  default y
+
+config FTRACE_FUNC_NAME_LIMIT
+  depends on FTRACE
+  int "Support function name max length"
+  default 64
+
+config FTRACE_FUNC_MAX_NUM
+  depends on FTRACE
+  int "Support how many functions"
+  default 128
 
 config DIFFTEST
   depends on TARGET_NATIVE_ELF

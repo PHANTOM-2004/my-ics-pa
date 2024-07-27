@@ -185,9 +185,11 @@ static int decode_exec(Decode *s) {
   INSTPAT("0000001 ????? ????? 000 ????? 0110011", mul, R,
           R(rd) = (word_t)((sword_t)src1 * (sword_t)src2));
   INSTPAT("0000001 ????? ????? 001 ????? 0110011", mulh, R,
-          R(rd) = (word_t)BITS((int64_t)(sword_t)src1 * (int64_t)(sword_t)src2, 63, 32));
+          R(rd) = (word_t)BITS((int64_t)(sword_t)src1 * (int64_t)(sword_t)src2,
+                               63, 32));
   INSTPAT("0000001 ????? ????? 010 ????? 0110011", mulhsu, R,
-          R(rd) = (word_t)BITS((int64_t)(sword_t)src1 * (uint64_t)src2, 63, 32));
+          R(rd) =
+              (word_t)BITS((int64_t)(sword_t)src1 * (uint64_t)src2, 63, 32));
   INSTPAT("0000001 ????? ????? 011 ????? 0110011", mulhu, R,
           R(rd) = (word_t)BITS((uint64_t)src1 * (uint64_t)src2, 63, 32));
   INSTPAT("0000001 ????? ????? 100 ????? 0110011", div, R,
@@ -225,11 +227,9 @@ static int decode_exec(Decode *s) {
   INSTPAT("??????? ????? ????? ??? ????? ????? ??", inv, N, INV(s->pc));
   INSTPAT_END();
 
-  Log("pc: " FMT_WORD " instruction: " FMT_WORD, cpu.pc, s->isa.inst.val);
-  Log("rd: %2d src1: " FMT_WORD " src2: " FMT_WORD " imm: " FMT_WORD, rd, src1,
-      src2, imm);
-  //Log("mul:  %d * %d = %d", src1, src2, R(rd));
-  //Log("mulh: %d * %d = %d", src1, src2, R(rd));
+  // Log("pc: " FMT_WORD " instruction: " FMT_WORD, cpu.pc, s->isa.inst.val);
+  // Log("rd: %2d src1: " FMT_WORD " src2: " FMT_WORD " imm: " FMT_WORD, rd,
+  // src1, src2, imm);
   R(0) = 0; // reset $zero to 0
 
   return 0;
