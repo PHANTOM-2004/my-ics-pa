@@ -21,7 +21,6 @@ extern char *elf_file;
 int init_elf();
 #endif
 
-
 void init_rand();
 void init_log(const char *log_file);
 void init_mem();
@@ -101,13 +100,14 @@ static int parse_args(int argc, char *argv[]) {
     case 'd':
       diff_so_file = optarg;
       break;
-#ifdef CONFIG_FTRACE
     case 'e':
+#ifdef CONFIG_FTRACE
       elf_file = optarg;
-      // here log is not initialized
       printf("[INFO] Get -e option and ELF file: %s\n", elf_file);
-      break;
 #endif
+      printf("Got elf file, bue ftrace is %s\n", ANSI_FMT("OFF", ANSI_FG_GREEN));
+      // here log is not initialized
+      break;
     case 1:
       img_file = optarg;
       return 0;

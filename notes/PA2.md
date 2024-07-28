@@ -400,7 +400,7 @@ AM = TRM + IOE + CTE + VME + MPE
 
 > `volatile` 关键字:  用于声明变量的值可能会在没有明显原因的情况下发生变化。这告诉编译器不要对这样的变量进行优化，即使编译器无法检测到该变量是如何改变的。实际上可能这个变量被硬件改变, 或者多线程中, 或者被其他某种方式改变, 不希望他被优化掉. 
 
-
+-- --
 ### Makfile的阅读
 
 ####  `.DEFAULTGOAL/MAKECOMMANDGOALS`
@@ -560,6 +560,7 @@ run: image
 > 
        If n is zero, the return value is zero.
 
+-- -- 
 ### 实现`stdio.h`
 
 参考这篇[文章](https://www.cprogramming.com/tutorial/c/lesson17.html)
@@ -596,6 +597,7 @@ double average(int const num , ...){
 }
 ```
 
+-- --
 ## `itrace`
 
 ### `iringbuf`
@@ -629,6 +631,7 @@ config ITRACE_RINGBUF_SIZE
   default 16
 ```
 
+-- --
 ## `mtrace`
 
 `mtrace`的实现就更显然了, 我们只需要在访存的部分实现记录即可. 
@@ -649,6 +652,7 @@ config MTRACE_WRITE
   default y
 ```
 
+-- --
 ## `ftrace`
 
 > 消失的符号, 说实话这个太明显了. 只需知道预处理已经预处理掉了即可. 
@@ -722,7 +726,6 @@ Key to Flags:
 [16] .rodata        PROGBITS        0000000000002000 002000 000010 00   A  0   0  4
 ```
 这是`readonly data`. 恰好就是`Hello World`放的地方. 
-
 
 ### 实现`ftrace`
 
@@ -904,3 +907,408 @@ config FTRACE_FUNC_MAX_NUM
   int "Support how many functions"
   default 128
 ```
+
+这个感觉还是非常`nice`的
+```
+[ITRACE]: recent instruction below
+         0x80000230: 00 00 07 97 auipc  a5, 0x0
+         0x80000234: 07 47 a7 83 lw     a5, 0x74(a5)
+         0x80000238: 40 f5 05 33 sub    a0, a0, a5
+         0x8000023c: 00 15 35 13 sltiu  a0, a0, 0x1
+         0x80000240: f8 1f f0 ef jal    ra, 0x800001c0
+         0x800001c0: 00 05 04 63 beq    a0, zero, 0x800001c8
+         0x800001c4: 00 00 80 67 jalr   zero, 0x0(ra)
+         0x80000244: 00 c1 20 83 lw     ra, 0xc(sp)
+         0x80000248: 00 81 24 03 lw     s0, 0x8(sp)
+         0x8000024c: 00 00 05 13 addi   a0, zero, 0x0
+         0x80000250: 01 01 01 13 addi   sp, sp, 0x10
+         0x80000254: 00 00 80 67 jalr   zero, 0x0(ra)
+         0x80000278: 00 05 05 13 addi   a0, a0, 0x0
+  -->    0x8000027c: 00 10 00 73 ebreak
+         0x800001c4: 00 00 80 67 jalr   zero, 0x0(ra)
+         0x8000022c: 00 84 25 03 lw     a0, 0x8(s0)
+[FTRACE]: recent instruction below8000000c  call [_trm_init@80000264]
+80000274   call [main@800001d8]
+800001f8    call [f0@80000010]
+80000178     call [f2@800000b0]
+800000fc      call [f1@80000068]
+80000178       call [f2@800000b0]
+800000fc        call [f1@80000068]
+80000178         call [f2@800000b0]
+800000fc          call [f1@80000068]
+80000178           call [f2@800000b0]
+800000fc            call [f1@80000068]
+80000178             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+80000190             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+800001b8             ret [f2]
+8000010c            ret [f3]
+80000190           call [f2@800000b0]
+800000fc            call [f1@80000068]
+80000178             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+80000190             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+800001b8             ret [f2]
+8000010c            ret [f3]
+800001b8           ret [f2]
+8000010c          ret [f3]
+80000190         call [f2@800000b0]
+800000fc          call [f1@80000068]
+80000178           call [f2@800000b0]
+800000fc            call [f1@80000068]
+80000178             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+80000190             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+800001b8             ret [f2]
+8000010c            ret [f3]
+80000190           call [f2@800000b0]
+800000fc            call [f1@80000068]
+80000178             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+80000190             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+800001b8             ret [f2]
+8000010c            ret [f3]
+800001b8           ret [f2]
+8000010c          ret [f3]
+800001b8         ret [f2]
+8000010c        ret [f3]
+80000190       call [f2@800000b0]
+800000fc        call [f1@80000068]
+80000178         call [f2@800000b0]
+800000fc          call [f1@80000068]
+80000178           call [f2@800000b0]
+800000fc            call [f1@80000068]
+80000178             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+80000190             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+800001b8             ret [f2]
+8000010c            ret [f3]
+80000190           call [f2@800000b0]
+800000fc            call [f1@80000068]
+80000178             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+80000190             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+800001b8             ret [f2]
+8000010c            ret [f3]
+800001b8           ret [f2]
+8000010c          ret [f3]
+80000190         call [f2@800000b0]
+800000fc          call [f1@80000068]
+80000178           call [f2@800000b0]
+800000fc            call [f1@80000068]
+80000178             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+80000190             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+800001b8             ret [f2]
+8000010c            ret [f3]
+80000190           call [f2@800000b0]
+800000fc            call [f1@80000068]
+80000178             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+80000190             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+800001b8             ret [f2]
+8000010c            ret [f3]
+800001b8           ret [f2]
+8000010c          ret [f3]
+800001b8         ret [f2]
+8000010c        ret [f3]
+800001b8       ret [f2]
+8000010c      ret [f3]
+80000190     call [f2@800000b0]
+800000fc      call [f1@80000068]
+80000178       call [f2@800000b0]
+800000fc        call [f1@80000068]
+80000178         call [f2@800000b0]
+800000fc          call [f1@80000068]
+80000178           call [f2@800000b0]
+800000fc            call [f1@80000068]
+80000178             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+80000190             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+800001b8             ret [f2]
+8000010c            ret [f3]
+80000190           call [f2@800000b0]
+800000fc            call [f1@80000068]
+80000178             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+80000190             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+800001b8             ret [f2]
+8000010c            ret [f3]
+800001b8           ret [f2]
+8000010c          ret [f3]
+80000190         call [f2@800000b0]
+800000fc          call [f1@80000068]
+80000178           call [f2@800000b0]
+800000fc            call [f1@80000068]
+80000178             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+80000190             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+800001b8             ret [f2]
+8000010c            ret [f3]
+80000190           call [f2@800000b0]
+800000fc            call [f1@80000068]
+80000178             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+80000190             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+800001b8             ret [f2]
+8000010c            ret [f3]
+800001b8           ret [f2]
+8000010c          ret [f3]
+800001b8         ret [f2]
+8000010c        ret [f3]
+80000190       call [f2@800000b0]
+800000fc        call [f1@80000068]
+80000178         call [f2@800000b0]
+800000fc          call [f1@80000068]
+80000178           call [f2@800000b0]
+800000fc            call [f1@80000068]
+80000178             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+80000190             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+800001b8             ret [f2]
+8000010c            ret [f3]
+80000190           call [f2@800000b0]
+800000fc            call [f1@80000068]
+80000178             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+80000190             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+800001b8             ret [f2]
+8000010c            ret [f3]
+800001b8           ret [f2]
+8000010c          ret [f3]
+80000190         call [f2@800000b0]
+800000fc          call [f1@80000068]
+80000178           call [f2@800000b0]
+800000fc            call [f1@80000068]
+80000178             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+80000190             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+800001b8             ret [f2]
+8000010c            ret [f3]
+80000190           call [f2@800000b0]
+800000fc            call [f1@80000068]
+80000178             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+80000190             call [f2@800000b0]
+800000fc              call [f1@80000068]
+80000064               ret [f2]
+8000010c              ret [f3]
+800001b8             ret [f2]
+8000010c            ret [f3]
+800001b8           ret [f2]
+8000010c          ret [f3]
+800001b8         ret [f2]
+8000010c        ret [f3]
+800001b8       ret [f2]
+8000010c      ret [f3]
+800001b8     ret [main]
+80000210    call [check@800001c0]
+800001c4     ret [main]
+80000228    call [check@800001c0]
+800001c4     ret [main]
+80000240    call [check@800001c0]
+800001c4     ret [main]
+80000254    ret [_trm_init]
+test list [1 item(s)]: recursion
+[     recursion] PASS
+```
+
+### 符号表
+
+![](assets/Pasted%20image%2020240728142500.png)
+可执行文件中删除符号表, 不影响运行
+
+如果编译过程中文件
+```shell
+gcc -c hello.c
+strip -s hello.o
+
+gcc -o hello hello.c
+```
+
+```
+/usr/bin/ld: error in hello.o(.eh_frame); no .eh_frame_hdr table will be created  
+/usr/bin/ld: /usr/lib/gcc/x86_64-pc-linux-gnu/14.1.1/../../../../lib/Scrt1.o: in function `_start':  
+(.text+0x1b): undefined reference to `main'  
+collect2: error: ld returned 1 exit status
+```
+这是因为, 符号表在链接过程中是给`ld`用的, 没有符号表, `ld`就不知道如何链接. 前者是`gcc`已经完成了编译链接的过程, 因此不需要符号表. 
+
+
+## `trace`的一些优点
+
+还可以指导开发者进行程序和系统的优化, 例如:
+- 可以基于`ftrace`进一步分析出调用`memcpy()`时的参数情况, 比如`dest`和`src`是否对齐, 拷贝的内存长度是长还是短, 然后根据频繁出现的组合对`memcpy()`的算法实现进行优化
+- 可以基于`ftrace`统计函数调用的次数, 对访问次数较多的函数进行优化, 可以显著提升程序的性能
+- 可以基于`itrace`过滤出分支跳转指令的执行情况, 作为分支预测器(现代处理器中的一个提升性能的部件)的输入, 来调整分支预测器的实现, 从而提升处理器的性能
+- 可以基于`mtrace`得到程序的访存序列, 作为缓存(现代处理器中的另一个提升性能的部件)模型的输入, 对预取算法和替换算法的优化进行指导(你将会在`Lab4`中体会这一点)
+
+-- -- 
+
+## `klib`
+
+![](assets/Pasted%20image%2020240728155210.png)
+这个宏决定了`klib`库的行为. 
+
+> 为什么定义宏`__NATIVE_USE_KLIB__`之后就可以把`native`上的这些库函数链接到klib? 这具体是如何发生的? 尝试根据你在课堂上学习的链接相关的知识解释这一现象.
+
+```makefile
+echo "g++ -pie -o $(IMAGE) -Wl,--whole-archive $(LINKAGE) -Wl,-no-whole-archive $(LDFLAGS_CXX) -lSDL2 -ldl"
+```
+
+我们观测一下`LDFLAGS_CXX`
+
+```shell
+g++ 
+-pie 
+-o /home/scarlet-arch/Projects/cplusplus/NJU/PA/ics2023/am-kernels/tests/cpu-tests/build/string-native 
+-Wl,cat--whole-archive /home/scarlet-arch/Projects/cplusplus/NJU/PA/ics2023/am-kernels/tests/cpu-tests/build/native/tests/string.o /home/scarletarch/Projects/cplusplus/NJU/PA/ics2023/abstract-machine/am/build/am-native.a 
+/home/scarlet-arch/Projects/cplusplus/NJU/PA/ics2023/abstract-machine/klib/build/klib-native.a 
+-Wl,-no-whole-archive 
+-Wl,-z 
+-Wl,noexecstack -lSDL2 -ldl
+```
+
+```
+Wl,option
+Pass  option  as  an  option to the linker.  If option contains commas, it is split into multiple options at the commas.  You can use this syntax to pass an argument to the option.  
+
+For example, -Wl,-Map,output.map passes -Map output.map to the linker.  When using the GNU linker, you can also get the same effect with -Wl,-Map=output.map.
+```
+
+至于链接到标准库, 我想是`linkder`的原因. 我们可以用下面的程序验证: 
+```c
+#include <stdio.h>
+
+char *strcpy (char *__restrict __dest, const char *__restrict __src){
+  printf("T you\n");
+  return NULL;
+}
+
+int main(){
+  strcpy(NULL, NULL);
+  //printf("Hello world\n");
+}
+```
+
+> 在`gcc`下很奇怪的把`strcpy`的调用给优化掉了, 哪怕`O0`也不行. `clang`没有问题, 
+
+ 
+这里优先使用程序内部的, 如果这里没有, 才去链接标准库. 
+
+## Difftest
+
+```c
+// 在DUT host memory的`buf`和REF guest memory的`addr`之间拷贝`n`字节,
+// `direction`指定拷贝的方向, `DIFFTEST_TO_DUT`表示往DUT拷贝, `DIFFTEST_TO_REF`表示往REF拷贝
+void difftest_memcpy(paddr_t addr, void *buf, size_t n, bool direction);
+
+// `direction`为`DIFFTEST_TO_DUT`时, 获取REF的寄存器状态到`dut`;
+// `direction`为`DIFFTEST_TO_REF`时, 设置REF的寄存器状态为`dut`;
+void difftest_regcpy(void *dut, bool direction);
+
+// 让REF执行`n`条指令
+void difftest_exec(uint64_t n);
+
+// 初始化REF的DiffTest功能
+void difftest_init();
+```
+
+定位`isa_difftest_checkregs`
+
+![](assets/Pasted%20image%2020240728191457.png)
+
+![](assets/Pasted%20image%2020240728191551.png)
+
+实际上上面那个调用那是个函数指针, 看对应文件就可以发现. 
+
+![](assets/Pasted%20image%2020240728191759.png)
+
+> 有报错是因为我没有更新`compile_commands.json`. 更新之后就好了
+![](assets/Pasted%20image%2020240728191942.png)
+
+实际上这应该就是我们的原本的顺序. 
+
+![](assets/Pasted%20image%2020240728192721.png)
+我们比较的是这两个东西. 
+
+## TODO: 捕捉死循环
+
+> 初步想法, 就是如果在某一个地方jump来jump去, 也就是对`jump`相关命令进行跟踪, 如果发现有大量重复的地址, 那么就是死循环. 当然要设置一个界限. 

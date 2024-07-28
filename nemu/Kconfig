@@ -187,17 +187,17 @@ config FTRACE
 config FTRACE_FUNC_NAME_LIMIT
   depends on FTRACE
   int "Support function name max length"
-  default 64
+  default 128
 
 config FTRACE_FUNC_MAX_NUM
   depends on FTRACE
   int "Support how many functions"
-  default 128
+  default 1024
 
 config FTRACE_STACK_SIZE
   depends on FTRACE
   int "Set call stack size"
-  default 2048
+  default 8192
 
 config DIFFTEST
   depends on TARGET_NATIVE_ELF

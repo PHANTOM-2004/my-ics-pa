@@ -1,8 +1,11 @@
+
+#pragma once
+
 #ifndef __FTRACE_H__
 #define __FTRACE_H__
 
 #include "common.h"
-
+#ifdef CONFIG_FTRACE
 typedef struct {
   uint32_t value;
   uint32_t size;
@@ -12,5 +15,6 @@ typedef struct {
 
 int init_elf();
 Elf32_func const * get_elffunction(vaddr_t const target);
+#endif
 
 #endif

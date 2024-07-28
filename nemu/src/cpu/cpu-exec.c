@@ -58,7 +58,8 @@ static void iringbuf_trace(char const *_logbuf) {
 }
 
 static void print_iringbuf() {
-  printf("[ITRACE]: recent instruction below\n");
+  printf("[ITRACE]: recent instruction below[buffer %s full]\n",
+         ringbuf_full ? "" : ANSI_FMT("NOT", ANSI_FG_GREEN));
   int const buf_len =
       ringbuf_full ? CONFIG_ITRACE_RINGBUF_SIZE : ringbuf_pos + 1;
   for (int i = 0; i < buf_len; i++) {
@@ -104,7 +105,7 @@ static void print_ftrace() {
   }
 }
 
-static void ftrace(Decode const *const s, char const* disassemble) {
+static void ftrace(Decode const *const s, char const *disassemble) {
 
   static int const ra = 0x1;
   /*rd and auipc for last time */
@@ -119,8 +120,7 @@ static void ftrace(Decode const *const s, char const* disassemble) {
                        (uint32_t)BITS(i, 14, 12) == 0b000;
 
   bool const is_near_cal = is_jal && rd == ra;
-  bool const is_far_call =
-      is_jalr && rd == ra;
+  bool const is_far_call = is_jalr && rd == ra;
   bool const is_call = is_near_cal || is_far_call;
 
   // imm=0, rs1 = ra, rd = zero; pc = rs1 + imm = ra + 0
@@ -137,7 +137,7 @@ static void ftrace(Decode const *const s, char const* disassemble) {
 
     func = get_elffunction(s->dnpc);
     Assert(func, "get elffunction cannot be NULL");
-    //Log("%08x %s", s->pc, disassemble);
+    // Log("%08x %s", s->pc, disassemble);
     Log("call@[%08x@%s]", s->dnpc, func->name);
 
     call_stack[stk_ptr].func = func;
@@ -152,7 +152,7 @@ static void ftrace(Decode const *const s, char const* disassemble) {
 
     func = get_elffunction(s->dnpc);
     Assert(func, "get elffunction cannot be NULL");
-    //Log("%08x %s", s->pc, disassemble);
+    // Log("%08x %s", s->pc, disassemble);
     Log("ret@[%08x] %s", s->dnpc, func->name);
 
     call_stack[stk_ptr].func = func;
@@ -222,7 +222,7 @@ static void exec_once(Decode *s, vaddr_t pc) {
   p[0] = '\0'; // the upstream llvm does not support loongarch32r
 #endif
 #endif
-  //Log("[%08x] %s", s->pc, p);
+  // Log("[%08x] %s", s->pc, p);
   IFDEF(CONFIG_FTRACE, ftrace(s, p));
 }
 
