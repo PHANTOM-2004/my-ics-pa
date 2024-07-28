@@ -194,6 +194,11 @@ config FTRACE_FUNC_MAX_NUM
   int "Support how many functions"
   default 128
 
+config FTRACE_STACK_SIZE
+  depends on FTRACE
+  int "Set call stack size"
+  default 2048
+
 config DIFFTEST
   depends on TARGET_NATIVE_ELF
   bool "Enable differential testing"

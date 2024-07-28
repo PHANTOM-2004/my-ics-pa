@@ -14,12 +14,14 @@
  ***************************************************************************************/
 
 #include "common.h"
+#include "difftest-def.h"
 #include "isa.h"
 #include "utils.h"
 #include <cpu/cpu.h>
 #include <cpu/decode.h>
 #include <cpu/difftest.h>
 #include <locale.h>
+#include <stdint.h>
 
 /* The assembly code of instructions executed is only output to the screen
  * when the number of instructions executed is less than this value.
@@ -47,7 +49,7 @@ static bool ringbuf_full = false;
 
 static void iringbuf_trace(char const *_logbuf) {
   // Log("call iringbuf, config size : %d", CONFIG_ITRACE_RINGBUF_SIZE);
-    ringbuf_pos++;
+  ringbuf_pos++;
   if (ringbuf_pos == CONFIG_ITRACE_RINGBUF_SIZE)
     ringbuf_pos = 0, ringbuf_full = true;
 
@@ -56,17 +58,113 @@ static void iringbuf_trace(char const *_logbuf) {
 }
 
 static void print_iringbuf() {
-  
   printf("[ITRACE]: recent instruction below\n");
   int const buf_len =
       ringbuf_full ? CONFIG_ITRACE_RINGBUF_SIZE : ringbuf_pos + 1;
   for (int i = 0; i < buf_len; i++) {
-    printf("%s ", i == ringbuf_pos ? "-->\t" : "\t");
+    printf("%s ", i == ringbuf_pos ? "  -->\t" : "\t");
     printf("%s\n", ringbuf[i]);
   }
 }
 
 #undef CHAR_BUF_LEN
+#endif
+
+#ifdef CONFIG_FTRACE
+#include <trace/ftrace.h>
+
+static struct {
+  Elf32_func const *func;
+  vaddr_t pc;
+  enum { CALL, RET } status;
+} call_stack[CONFIG_FTRACE_STACK_SIZE * 2];
+static int stk_ptr = 0;
+
+static void printws(int len) {
+  while (len--)
+    printf(" ");
+}
+
+static void print_ftrace() {
+  printf("[FTRACE]: recent instruction below");
+  int space = 2;
+  for (int i = 0; i < stk_ptr; i++) {
+    if (call_stack[i].status == CALL) {
+      printf("%08x", call_stack[i].pc);
+      printws(space);
+      printf("call [%s@%08x]\n", call_stack[i].func->name,
+             call_stack[i].func->value);
+      space++;
+    } else {
+      printf("%08x", call_stack[i].pc);
+      printws(space);
+      printf("ret [%s]\n", call_stack[i].func->name);
+      space--;
+    }
+  }
+}
+
+static void ftrace(Decode const *const s, char const* disassemble) {
+
+  static int const ra = 0x1;
+  /*rd and auipc for last time */
+
+  uint32_t const i = s->isa.inst.val;
+  uint32_t const jalr_offset = BITS(i, 31, 20);
+  int const rs1 = BITS(i, 19, 15);
+  int const rd = BITS(i, 11, 7);
+
+  bool const is_jal = (uint32_t)BITS(i, 6, 0) == 0b1101111;
+  bool const is_jalr = (uint32_t)BITS(i, 6, 0) == 0b1100111 &&
+                       (uint32_t)BITS(i, 14, 12) == 0b000;
+
+  bool const is_near_cal = is_jal && rd == ra;
+  bool const is_far_call =
+      is_jalr && rd == ra;
+  bool const is_call = is_near_cal || is_far_call;
+
+  // imm=0, rs1 = ra, rd = zero; pc = rs1 + imm = ra + 0
+  bool const is_ret = is_jalr && !jalr_offset && rs1 == ra && rd == 0x0;
+
+  Assert(stk_ptr >= 0 && stk_ptr < CONFIG_FTRACE_STACK_SIZE,
+         "stack only support at most %d", CONFIG_FTRACE_STACK_SIZE);
+
+  Elf32_func const *func = NULL;
+
+  /*if it is call*/
+  if (is_call) {
+    // add to call stack
+
+    func = get_elffunction(s->dnpc);
+    Assert(func, "get elffunction cannot be NULL");
+    //Log("%08x %s", s->pc, disassemble);
+    Log("call@[%08x@%s]", s->dnpc, func->name);
+
+    call_stack[stk_ptr].func = func;
+    call_stack[stk_ptr].pc = s->pc;
+    call_stack[stk_ptr].status = CALL;
+    stk_ptr++;
+    return;
+  }
+
+  /* if it is ret*/
+  else if (is_ret) {
+
+    func = get_elffunction(s->dnpc);
+    Assert(func, "get elffunction cannot be NULL");
+    //Log("%08x %s", s->pc, disassemble);
+    Log("ret@[%08x] %s", s->dnpc, func->name);
+
+    call_stack[stk_ptr].func = func;
+    call_stack[stk_ptr].pc = s->pc;
+    call_stack[stk_ptr].status = RET;
+    stk_ptr++;
+    return;
+  }
+
+  // up date last
+}
+
 #endif
 
 /*watch point new, watch point free*/
@@ -83,7 +181,7 @@ static void trace_and_difftest(Decode *_this, vaddr_t dnpc) {
 
 #ifdef CONFIG_ITRACE_RINGBUF_ON
   iringbuf_trace(_this->logbuf);
-  //print_iringbuf();
+  // print_iringbuf();
 #endif
   /*scan all the watch point here*/
 #ifdef CONFIG_CONFIG_WATCHPOINT
@@ -124,6 +222,8 @@ static void exec_once(Decode *s, vaddr_t pc) {
   p[0] = '\0'; // the upstream llvm does not support loongarch32r
 #endif
 #endif
+  //Log("[%08x] %s", s->pc, p);
+  IFDEF(CONFIG_FTRACE, ftrace(s, p));
 }
 
 static void execute(uint64_t n) {
@@ -152,9 +252,8 @@ static void statistic() {
 }
 
 void assert_fail_msg() {
-#ifdef CONFIG_ITRACE_RINGBUF_ON
-  print_iringbuf();
-#endif
+  IFDEF(CONFIG_ITRACE_RINGBUF_ON, print_iringbuf());
+  IFDEF(CONFIG_FTRACE, print_ftrace());
   isa_reg_display();
   statistic();
 }
@@ -196,5 +295,7 @@ void cpu_exec(uint64_t n) {
     // fall through
   case NEMU_QUIT:
     statistic();
+    IFDEF(CONFIG_ITRACE_RINGBUF_ON, print_iringbuf());
+    IFDEF(CONFIG_FTRACE, print_ftrace());
   }
 }

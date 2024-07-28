@@ -4,18 +4,13 @@
  * parsing elf
  *
  */
+
 #include "common.h"
-#include "utils.h"
 
 #ifdef CONFIG_FTRACE
 #include <elf.h>
 #include <stdint.h>
-
-typedef struct {
-  uint32_t value;
-  uint32_t size;
-  char name[1 + CONFIG_FTRACE_FUNC_NAME_LIMIT];
-} Elf32_func;
+#include <trace/ftrace.h>
 
 typedef struct {
   bool is_elf32;
@@ -40,9 +35,29 @@ typedef struct {
 
 char *elf_file = NULL;
 static FILE *fp = NULL;
+
+/*elf functions*/
 static int function_num = 0;
 static Elf32_func
     all_functions[CONFIG_FTRACE_FUNC_MAX_NUM]; // support at most 128
+
+Elf32_func const *get_elffunction(vaddr_t const target) {
+  // uint32_t l = 0, r=0;
+  for (int i = 0; i < function_num; i++) {
+    if (target < all_functions[i].value ||
+        target >= all_functions[i].value + all_functions[i].size)
+      continue;
+
+    // l = all_functions[i].value;
+    // r = all_functions[i].value + all_functions[i].size;
+
+    return all_functions + i;
+  }
+
+  Log("[FUNCTION NOT FOUND]target addr: %x does not belong to any function",
+      target);
+  return NULL;
+}
 
 static void check_malloc(void const *ptr) {
   if (!ptr) {
@@ -232,7 +247,7 @@ static void parser_constructor(Elf32_parser *const _this) {
 
 static int elf_parser() {
 
-  Elf32_parser this_parser; // I don't want to malloc here
+  static Elf32_parser this_parser; // I don't want to malloc here
   parser_constructor(&this_parser);
 
   /*parse elf header first*/

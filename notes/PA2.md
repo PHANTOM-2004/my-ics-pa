@@ -195,7 +195,7 @@ Disassembly of section .text:
 >
 >SLL, SRL, and SRA perform logical left, logical right, and arithmetic right shifts on the value in register rs1 by the shift amount held in the lower 5 bits of register rs2
 
- 7. `REM/MULT/DIV`
+ 8. `REM/MULT/DIV`
 >  MUL performs an XLEN-bit×XLEN-bit multiplication of rs1 by rs2 and places the lower XLEN bits in the destination register. MULH, MULHU, and MULHSU perform the same multiplication but return the upper XLEN bits of the full 2×XLEN-bit product, for signed×signed, unsigned×unsigned, and rs1×unsigned rs2 multiplication, respectively.
 > 
 > If both the high and low bits of the same product are required, then the recommended code sequence is: MULH[[S]U] rdh, rs1, rs2; MUL rdl, rs1, rs2 (source register specifiers must be in same order and rdh cannot be the same as rs1 or rs2). Microarchitectures can then fuse these into a single multiply operation instead of performing two separate multiplies.
@@ -726,7 +726,7 @@ Key to Flags:
 
 ### 实现`ftrace`
 
-#### 参数解析
+#### 参数解析+传递`ELF`文件
 ```
 getopt_long() and getopt_long_only()
        The getopt_long() function works like getopt() except that it also accepts long options, started with two dashes.  (If the program accepts only long options, then optstring should be specified as an empty string  (""), not NULL.)  Long option naimes may be abbreviated if the abbreviation is unique or is an exact match for some defined option.  A long option may take a parameter, of the form --arg=param or --arg param.
@@ -866,7 +866,26 @@ int main(int argc, char **argv)
 - 如果给定一个地址, 那么我们就扫描整个符号表中所有`Type=FUNC`的条目.
 - 检查这个地址是否处于`[Value, Value + Size)`这个区间里面, 如果是的, 说明就是这个函数. 
 
+如何区分`call`和`ret`, 其实这个比较容易, 我们只需要知道, 这两个都是伪指令. 
+[参考](https://projectf.io/posts/riscv-jump-function/)
+![](assets/Pasted%20image%2020240728110859.png)
+![](assets/Pasted%20image%2020240728102854.png)
 
+对于`call`来说, 前面一定会有一个`auipc`, 那么就显然了.  这不对,  因为这个是大跳, 一个function还可以通过小跳来`call`. 因此这里需要读`RISCV32-ABI`.
+
+```asm
+jal  rd, imm       # rd = pc+4; pc += imm
+jalr rd, rs1, imm  # rd = pc+4; pc = rs1+imm
+```
+
+> In the above example we used **jal** to call our function, but it’s limited to `±1MiB` relative to the PC. For far calls we can combine **jalr** with [auipc](https://projectf.io/posts/riscv-branch-set#auipc) to reach anywhere in 32-bit memory space. Use the **call** pseudoinstruction and the assembler will choose the correct instruction(s) for you.
+
+> 这里的`x1`就是1号寄存器,根据`abi`规定, 就是函数调用的约定. 因此但凡`jal`放到`ra`里面的就是调用. 因此`call`的时候我们区分大小跳. 
+
+> 对于`ret`来说就是考虑`zero`和`ra`. 那么`imm=0, rs1 = ra, rd = zero`
+
+![](assets/Pasted%20image%2020240728141531.png)
+这个问题其实也很显然, 考察返回的时候的地址, 假如我在`main`里边调用了`add`, 那么返回的时候这个地址实际上就是调用时候的地址, 也就是说这个地址是在`main`里边的, 所以说`ret main`而不是`ret add`. 
 
 #### `menuconfig`
 ```konfig
@@ -874,8 +893,14 @@ config FTRACE
   depends on TRACE && TARGET_NATIVE_ELF && ENGINE_INTERPRETER
   bool "Enable function call tracer"
   default y
-```
-#### 传递给`nemu`一个`elf`文件
-```
-```
 
+config FTRACE_FUNC_NAME_LIMIT
+  depends on FTRACE
+  int "Support function name max length"
+  default 64
+
+config FTRACE_FUNC_MAX_NUM
+  depends on FTRACE
+  int "Support how many functions"
+  default 128
+```
