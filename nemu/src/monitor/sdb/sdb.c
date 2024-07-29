@@ -230,15 +230,20 @@ static int cmd_info(char *args) {
 }
 
 static int cmd_si(char *args) {
-  char *number = strtok(NULL, " "); // delimiter = space
-  for (char *ptr = number; ptr; ptr++) {
-    if (!isdigit(ptr)) {
+  if(args == NULL){
+    cpu_exec(1);
+    return 0;
+  }
+
+  char const *number = args; // delimiter = space
+  for (char const *ptr = number; *ptr; ptr++) {
+    if (!isdigit(*ptr)) {
       Log(CMD_ERROR_OUTPUT_FMT, "si", "non-digit input");
       return 0;
     }
   }
 
-  int const times = number ? atoi(number) : 1;
+  int const times = atoi(number);
   cpu_exec(times);
   return 0;
 }

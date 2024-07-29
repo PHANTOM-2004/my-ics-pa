@@ -115,10 +115,10 @@ int wp_insert(char *_expr) {
   _new_node->next = tmp;
   _new_node->NO = w_id;
 
-  int const len = (int)strlen(_expr);
+  size_t const len = strlen(_expr);
   bool success = true;
   _new_node->w_expr = (char *)malloc(sizeof(char) * (len + 1));
-  Log("wp_insert: malloc %d", (int)sizeof(char) * (len + 1));
+  Log("wp_insert: malloc %d", (int)sizeof(char) * (int)(len + 1));
   strncpy(_new_node->w_expr, _expr, len);
   _new_node->w_expr[len] = '\0';
   _new_node->val = expr(_new_node->w_expr, &success);

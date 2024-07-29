@@ -1312,3 +1312,374 @@ void difftest_init();
 ## TODO: 捕捉死循环
 
 > 初步想法, 就是如果在某一个地方jump来jump去, 也就是对`jump`相关命令进行跟踪, 如果发现有大量重复的地址, 那么就是死循环. 当然要设置一个界限. 
+
+
+-- --
+
+## IO
+
+### 编址
+
+给设备也像寄存器一样编号, `CPU`访问他们. 
+
+### 端口IO
+
+> 一种I/O编址方式是端口映射I/O(port-mapped I/O), CPU使用专门的I/O指令对设备进行访问, 并把设备的地址称作端口号.
+
+这种情况使用专门的IO召集令. 
+
+x86提供了`in`和`out`指令用于访问设备, 其中`in`指令用于将设备寄存器中的数据传输到CPU寄存器中, `out`指令用于将CPU寄存器中的数据传送到设备寄存器中. 一个例子是使用`out`指令给串口发送命令字:
+
+```asm
+movl $0x41, %al
+movl $0x3f8, %edx
+outb %al, (%dx)
+```
+
+
+> 但是这种方法不现实, 因为一旦设计了IO指令, 那么访问的设备的地址就固定了下来. 
+
+### 内存映射IO
+
+> 随着设备越来越多, 功能也越来越复杂, I/O地址空间有限的端口映射I/O已经逐渐不能满足需求了. 有的设备需要让CPU访问一段较大的连续存储空间, 如VGA的显存, 24色加上Alpha通道的1024x768分辨率的显存就需要3MB的编址范围. 于是内存映射I/O(memory-mapped I/O, MMIO)应运而生.
+
+内存映射I/O成为了现代计算机主流的I/O编址方式: RISC架构只提供内存映射I/O的编址方式, 而PCI-e, 网卡, x86的APIC等主流设备, 都支持通过内存映射I/O来访问.
+
+> volatile关键字
+
+```c
+void fun() {  
+ extern unsigned char _end;  // _end是什么?  
+ volatile unsigned char *p = &_end;  
+ *p = 0;  
+ while(*p != 0xff);  
+ *p = 0x33;  
+ *p = 0x34;  
+ *p = 0x86;  
+}
+```
+
+```asm
+0000000000001130 <fun>:  
+   1130:       c6 05 e1 2e 00 00 00    movb   $0x0,0x2ee1(%rip)  # 4018 <_end>  
+   1137:       eb fe                   jmp    1137 <fun+0x7>
+```
+
+```asm
+0000000000001150 <fun>:  
+   1150:       c6 05 c1 2e 00 00 00    movb   $0x0,0x2ec1(%rip)  # 4018 <_end>  
+   1157:       48 8d 15 ba 2e 00 00    lea    0x2eba(%rip),%rdx  # 4018 <_end>  
+   115e:       66 90                   xchg   %ax,%ax  
+   1160:       0f b6 02                movzbl (%rdx),%eax  
+   1163:       3c ff                   cmp    $0xff,%al  
+   1165:       75 f9                   jne    1160 <fun+0x10>  
+   1167:       c6 05 aa 2e 00 00 33    movb   $0x33,0x2eaa(%rip) # 4018 <_end>  
+   116e:       c6 05 a3 2e 00 00 34    movb   $0x34,0x2ea3(%rip) # 4018 <_end>  
+   1175:       c6 05 9c 2e 00 00 86    movb   $0x86,0x2e9c(%rip) # 4018 <_end>  
+   117c:       c3                      ret
+```
+
+
+### `map_read/write`
+
+```c
+word_t map_read(paddr_t addr, int len, IOMap *map) {
+  assert(len >= 1 && len <= 8);
+  check_bound(map, addr);
+  paddr_t offset = addr - map->low;
+  invoke_callback(map->callback, offset, len, false); // prepare data to read
+  word_t ret = host_read(map->space + offset, len);
+  return ret;
+}
+```
+
+其中`map_read()`和`map_write()`用于将地址`addr`映射到`map`所指示的目标空间, 并进行访问. 访问时, 可能会触发相应的回调函数, 对设备和目标空间的状态进行更新. 由于NEMU是单线程程序, 因此只能串行模拟整个计算机系统的工作, 每次进行I/O读写的时候, 才会调用设备提供的回调函数(callback). 基于这两个API, 我们就可以很容易实现端口映射I/O和内存映射I/O的模拟了.
+
+```c
+void paddr_write(paddr_t addr, int len, word_t data) {
+  if (likely(in_pmem(addr))) {
+#ifdef CONFIG_MTRACE_WRITE
+    Log("\twrite paddr:\t%x[%d]\twrite data:\t" FMT_WORD, (uint32_t)addr, len, data);
+#endif
+    pmem_write(addr, len, data);
+    return;
+  }
+  IFDEF(CONFIG_DEVICE, mmio_write(addr, len, data); return);
+  out_of_bound(addr);
+}
+```
+
+```c
+void mmio_write(paddr_t addr, int len, word_t data) {
+  map_write(addr, len, data, fetch_mmio_map(addr));
+}
+```
+这里`fetch_...`找不到的时候返回`NULL`. 
+
+```c
+static void check_bound(IOMap *map, paddr_t addr) {
+  if (map == NULL) {
+    Assert(map != NULL, "address (" FMT_PADDR ") is out of bound at pc = " FMT_WORD, addr, cpu.pc);
+  } else {
+    Assert(addr <= map->high && addr >= map->low,
+        "address (" FMT_PADDR ") is out of bound {%s} [" FMT_PADDR ", " FMT_PADDR "] at pc = " FMT_WORD,
+        addr, map->name, map->low, map->high, cpu.pc);
+  }
+}
+```
+下面`check_bound`会进行检测, 保证在范围内. 
+
+注意一点, `nemu`和`ref`在面对IO的时候行为不一定一样. 
+```c
+static inline int find_mapid_by_addr(IOMap *maps, int size, paddr_t addr) {
+  int i;
+  for (i = 0; i < size; i ++) {
+    if (map_inside(maps + i, addr)) {
+      difftest_skip_ref();
+      return i;
+    }
+  }
+  return -1;
+}
+```
+
+> 传递参数: `mainargs`. 这个问题在`AM`的platform相关的部分, 给`make`传递参数, 制定`ARS`. `nemu`中的`makefile`会利用这个参数运行. 
+```
+run: image
+	$(MAKE) -C $(NEMU_HOME) ISA=$(ISA) run ARGS="$(NEMUFLAGS) --batch -e $(IMAGE).elf" IMG=$(IMAGE).bin
+```
+如果是`native`, 那么如何输出的`mainargs`呢?
+
+这里我们发现`hello`的`main`比较奇怪, 并不是真正的`main`, 他只有`mainargs`而没有`argc`参数. 我们找到被调用的地方. 
+
+```c
+  const char *args = getenv("mainargs");
+  halt(main(args ? args : "")); // call main here!
+```
+其中`getenv()`是一个库函数. 
+>   getenv, secure_getenv - get an environment variable
+
+那这样其实就有说法了. 我们可以
+```shell
+export mainargs='son of bitch'
+make ARCH=native run
+```
+得到输出
+```
+# Building hello-run [native]
+# Building am-archive [native]
+# Building klib-archive [native]
+# Creating image [native]
++ LD -> build/hello-native
+/home/scarlet-arch/Projects/cplusplus/NJU/PA/ics2023/am-kernels/kernels/hello/build/hello-native
+Hello, AbstractMachine!
+mainargs = 'son of bitch'.
+Exit code = 00h
+```
+
+-- --
+## 实现`printf`
+
+> In C++, overflow of signed integers results in undefined behaviour (UB), whereas **overflow of unsigned integers is defined**
+
+我们设计一个`printf_base`, 然后使用一个函数指针`string_handler_t`处理输出. 
+
+```c
+typedef void (*string_handler_t)(char *, char const *, size_t);
+
+static inline void str_write_to_buffer(char *out, char const *in, size_t size) {
+  assert(out);
+  assert(in);
+  memcpy(out, in, size);
+}
+
+static inline void str_write_to_stdout(char *out, char const *in, size_t size) {
+  assert(out == NULL); // out is stdout
+  assert(in);
+  size_t cnt = 0;
+  while (*in && cnt++ < size)
+    putch(*in++);
+}
+
+```
+
+为基类设计如下签名: 
+```c
+int printf_base(char *out, char const *fmt, size_t const n,
+                string_handler_t shandler, va_list ap); 
+```
+
+-- --
+## 实现`__am_timer_update`
+
+我们参照`native`的实现
+
+```c
+//native 
+void __am_timer_uptime(AM_TIMER_UPTIME_T *uptime) {
+  struct timeval now;
+  gettimeofday(&now, NULL);
+  long seconds = now.tv_sec - boot_time.tv_sec;
+  long useconds = now.tv_usec - boot_time.tv_usec;
+  uptime->us = seconds * 1000000 + (useconds + 500);
+}
+
+void __am_timer_init() {
+  gettimeofday(&boot_time, NULL);
+}
+```
+
+但是我们获得系统时钟的方式不能是`gettimeofday`, 而是来源于我们的`nemu`. 
+
+```c
+static uint32_t *rtc_port_base = NULL;
+
+static void rtc_io_handler(uint32_t offset, int len, bool is_write) {
+  assert(offset == 0 || offset == 4);
+  if (!is_write && offset == 4) {
+    uint64_t us = get_time();
+    rtc_port_base[0] = (uint32_t)us;
+    rtc_port_base[1] = us >> 32;
+  }
+}
+```
+上文是`nemu`写入时间的端口.
+
+```c
+void init_timer() {
+  rtc_port_base = (uint32_t *)new_space(8);
+#ifdef CONFIG_HAS_PORT_IO
+  add_pio_map ("rtc", CONFIG_RTC_PORT, rtc_port_base, 8, rtc_io_handler);
+#else
+  add_mmio_map("rtc", CONFIG_RTC_MMIO, rtc_port_base, 8, rtc_io_handler);
+#endif
+  IFNDEF(CONFIG_TARGET_AM, add_alarm_handle(timer_intr));
+}
+```
+接下来看`nemu`初始化时钟的方式. 
+```c
+void add_mmio_map(const char *name, paddr_t addr, void *space, uint32_t len, io_callback_t callback) {
+  assert(nr_map < NR_MAP);
+  paddr_t left = addr, right = addr + len - 1;
+  if (in_pmem(left) || in_pmem(right)) {
+    report_mmio_overlap(name, left, right, "pmem", PMEM_LEFT, PMEM_RIGHT);
+  }// 这里是区间检测
+  for (int i = 0; i < nr_map; i++) {
+    if (left <= maps[i].high && right >= maps[i].low) {
+      report_mmio_overlap(name, left, right, maps[i].name, maps[i].low, maps[i].high);//这里是其他外设检测
+    }
+  }
+
+  maps[nr_map] = (IOMap){ .name = name, .low = addr, .high = addr + len - 1,
+    .space = space, .callback = callback };//加入map
+  Log("Add mmio map '%s' at [" FMT_PADDR ", " FMT_PADDR "]",
+      maps[nr_map].name, maps[nr_map].low, maps[nr_map].high);
+
+  nr_map ++;
+}
+```
+
+所以我们要想办法从`nemu`中读上述的时间. 
+这个时候再关注`nemu.h`, 提供了相对的地址. 这里有一点很有意思, 有一个
+```c
+extern char _pmem_start
+```
+但是我们找不到这个符号. 因为这个符号是传递给`ld`的, 给`ld`传的时候指定了这个符号的地址. 
+```makefile
+LDFLAGS   += -T $(AM_HOME)/scripts/linker.ld \
+             --defsym=_pmem_start=0x80000000 --defsym=_entry_offset=0x0
+```
+
+当然我们具体实现呢, 是不依赖这个`_pmem_start`, 因为我们这里找的是裸机的地址. <u>注意此时的抽象层次</u>. 
+```c
+static AM_TIMER_UPTIME_T boot_time = {};
+
+void __am_timer_init() {
+  uint64_t const _read_time = *(uint64_t*)RTC_ADDR;
+  boot_time.us = _read_time;
+}
+
+void __am_timer_uptime(AM_TIMER_UPTIME_T *uptime) {
+  uint64_t const _read_time = *(uint64_t*)RTC_ADDR;
+  uptime->us = _read_time - boot_time.us; 
+}
+```
+
+-- -- 
+## 测测你的🐎
+
+第一次出现了一些问题, 忘记把`device`打开了, 因此出现地址出错. 
+
+> 然后就遇到留得坑了, 这个跑分显示不正常. 
+![](assets/Pasted%20image%2020240729195907.png)
+
+> 关于`AM_TIMER_UPTIME`的实现, 我们在框架代码中埋了一些小坑, 如果你没有修复相关的问题, 你可能会在运行benchmark的时候出现跑分不正确的现象. 这是为了强迫大家认真RTFSC了解程序运行过程中的一切细节: benchmark读取时钟信息的时候, 整个计算机系统究竟发生了什么? 只有这样你才能把时钟相关的bug调试正确.
+
+
+我们首先理一下思路, 在`AM`层面编写的程序, 这实际上编译出来就是访存裸指令.
+```c
+void __am_timer_uptime(AM_TIMER_UPTIME_T *uptime) {
+  uint64_t const _read_time = *(uint64_t*)RTC_ADDR;
+  uptime->us = _read_time - boot_time.us; 
+}
+```
+这部分的机器指令在`nemu`中执行. 然后每次在`nemu`中访问外设会呼叫`map_read`(访存失败的`fallback`), 在这里边会调用回调函数`callback`, `RTC`的回调就是更新时间. 所以说当我们读的时候, 就更新时间. 看起来没毛病. 
+
+回调内部, 如果偏移量是`4`, 也就是访问高字节(`uint64_t`分两部分访存)的时候, 我们才更新时间. 
+```c
+  if (!is_write && offset == 4) { // any time here when read update
+    uint64_t us = get_time();
+    rtc_port_base[0] = (uint32_t)us;
+    rtc_port_base[1] = us >> 32;
+    //Log("[UPDATE] update RTC %s %lu", is_write ? "W" : "R", us);
+  }
+```
+
+前边的都没什么问题. 最后把`uptime`改为绝对时间, 才可以`bench`. 也就是我们并不需要记录一个`boot_time`. 
+
+我们回顾`rtc_io_handler`的实现, 其中有一个`get_time()`然后设置为当前时间: 
+```c
+    uint64_t us = get_time();
+```
+
+这里的`get_time()`并不是我想当然的某个库函数. 
+```c
+uint64_t get_time() {
+  if (boot_time == 0) boot_time = get_time_internal();
+  uint64_t now = get_time_internal();
+  return now - boot_time;
+}
+```
+内部的`get_time_internal()`如下. 
+```c
+static uint64_t get_time_internal() {
+#if defined(CONFIG_TARGET_AM)
+  uint64_t us = io_read(AM_TIMER_UPTIME).us;
+#elif defined(CONFIG_TIMER_GETTIMEOFDAY)
+  struct timeval now;
+  gettimeofday(&now, NULL);
+  uint64_t us = now.tv_sec * 1000000 + now.tv_usec;
+#else
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC_COARSE, &now);
+  uint64_t us = now.tv_sec * 1000000 + now.tv_nsec / 1000;
+#endif
+  return us;
+}
+```
+所以第一次调用`get_time()`开始(这个时候第一次调用就是`boot_time`)
+实际上这个第一次调用出现在`cpu_exec`函数中. 也就是`cpu`启动的时候. 
+
+之后`get_time()`返回的就是距离`cpu`启动发生了多长时间, 也就是说这个已经是一个时间段而不是时间点了, 所以我们在`am`里边使用`boot_time`就是错误的, 所以导致跑分异常高. 
+
+> 我想这就是这个坑吧. 的确要读很多很多`Fucking source code`. 
+
+最后测完记录一下:
+![](assets/Pasted%20image%2020240730000137.png)
+
+
+## `Klib`- 编写可移植的程序
+
+> 为了不损害程序的可移植性, 你编写程序的时候不能再做一些架构相关的假设了, 比如"指针的长度是4字节"将不再成立, 因为在`native`上指针长度是8字节, 按照这个假设编写的程序, 在`native`上运行很有可能会触发段错误.
+> 
+> 当然, 解决问题的方法还是有的, 至于要怎么做, 老规矩, STFW吧.
