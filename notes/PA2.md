@@ -1309,6 +1309,7 @@ void difftest_init();
 ![](assets/Pasted%20image%2020240728192721.png)
 我们比较的是这两个东西. 
 
+-- -- 
 ## TODO: 捕捉死循环
 
 > 初步想法, 就是如果在某一个地方jump来jump去, 也就是对`jump`相关命令进行跟踪, 如果发现有大量重复的地址, 那么就是死循环. 当然要设置一个界限. 
@@ -1677,9 +1678,443 @@ static uint64_t get_time_internal() {
 最后测完记录一下:
 ![](assets/Pasted%20image%2020240730000137.png)
 
+## Run something cool
+![](assets/Pasted%20image%2020240730112656.png)
 
+![](assets/Pasted%20image%2020240730112850.png)
+`nemu`没有实现声卡, 所以没有声音
+![](assets/Pasted%20image%2020240730113034.png)
+
+-- -- 
+## `DTRACE`
+这是显然的, 我们只需要在`map_read/write`中记录即可. 
+
+-- -- 
+## `keyboard`
+这里阅读源代码时有些宏过于复杂, 我们对其展开.
+```shell
+gcc -E keyboard.c -I $NEMU_HOME/include -I $NEMU_HOME/src/device/ | less
+```
+右边的是枚举类型, 左边是把左边数组填充对应的枚举值. 这样的简化的确非常有效. 
+```c
+static void init_keymap() {
+  keymap[SDL_SCANCODE_ESCAPE] = NEMU_KEY_ESCAPE; 
+  keymap[SDL_SCANCODE_F1] = NEMU_KEY_F1; 
+  keymap[SDL_SCANCODE_F2] = NEMU_KEY_F2; 
+  keymap[SDL_SCANCODE_F3] = NEMU_KEY_F3; 
+  keymap[SDL_SCANCODE_F4] = NEMU_KEY_F4; 
+  keymap[SDL_SCANCODE_F5] = NEMU_KEY_F5; 
+  keymap[SDL_SCANCODE_F6] = NEMU_KEY_F6; 
+  keymap[SDL_SCANCODE_F7] = NEMU_KEY_F7; 
+  ...
+  keymap[SDL_SCANCODE_DELETE] = NEMU_KEY_DELETE; 
+  keymap[SDL_SCANCODE_HOME] = NEMU_KEY_HOME; 
+  keymap[SDL_SCANCODE_END] = NEMU_KEY_END; 
+  keymap[SDL_SCANCODE_PAGEUP] = NEMU_KEY_PAGEUP; 
+  keymap[SDL_SCANCODE_PAGEDOWN] = NEMU_KEY_PAGEDOWN;
+}
+
+enum {
+  NEMU_KEY_NONE = 0,
+  NEMU_KEY_ESCAPE, NEMU_KEY_F1, NEMU_KEY_F2, NEMU_KEY_F3, NEMU_KEY_F4, 
+  ... 
+  NEMU_KEY_PAGEUP, NEMU_KEY_PAGEDOWN,
+};
+```
+
+展开的是这部分
+```c
+enum {
+  NEMU_KEY_NONE = 0,
+  MAP(NEMU_KEYS, NEMU_KEY_NAME)%%  %%
+};
+
+#define SDL_KEYMAP(k) keymap[SDL_SCANCODE_ ## k] = NEMU_KEY_ ## k;
+static uint32_t keymap[256] = {};
+
+static void init_keymap() {
+  MAP(NEMU_KEYS, SDL_KEYMAP)
+}
+```
+同时注意, 发送`keycode`的时候: 
+```c
+void send_key(uint8_t scancode, bool is_keydown) {
+  if (nemu_state.state == NEMU_RUNNING && keymap[scancode] != NEMU_KEY_NONE) {
+    uint32_t am_scancode = keymap[scancode] | (is_keydown ? KEYDOWN_MASK : 0);
+    key_enqueue(am_scancode);
+  }// 如果是down, 那么要或上一个mask, 所以我们只需要与这个mask, 看看有没有这
+  // bit = 1, 就可以判断是松开还是按下. 
+}
+```
+于是我们容易得到: 
+```c
+void __am_input_keybrd(AM_INPUT_KEYBRD_T *kbd) {
+  // keydown = true: it is pressed
+  uint32_t* const key_reg_addr = (uint32_t*)KBD_ADDR;// 4 bytes
+  uint32_t const keycode = *key_reg_addr;
+  kbd->keydown = !!(keycode & KEYDOWN_MASK);
+  kbd->keycode = keycode & ~KEYDOWN_MASK; // set KEYDOWN_MASK bit zero
+}
+```
+
+-- -- 
+## `VGA`
+
+这里提到了调色板, 这其实就是当年SJ的`OOP`的`bitmap`的某一次作业...
+
+> 具体地, 屏幕大小寄存器的硬件(NEMU)功能已经实现, 但软件(AM)还没有去使用它; 而对于同步寄存器则相反, 软件(AM)已经实现了同步屏幕的功能, 但硬件(NEMU)尚未添加相应的支持.
+
+### 屏幕大小寄存器
+
+这部分关注`nemu`的代码
+```c
+void init_vga() {
+  vgactl_port_base = (uint32_t *)new_space(8);
+  vgactl_port_base[0] = (screen_width() << 16) | screen_height();
+ ... 
+}
+
+static uint32_t screen_size() {
+  return screen_width() * screen_height() * sizeof(uint32_t);
+}
+```
+在`init_vga`中, 这里的`vgactl_port_base`是一个`8 byte`的空间, 其中`0`号写入的是长宽, 分别占两个字节. 
+
+这里对应硬件其实还没设那么多门槛, 直接补充函数就行, 我还以为要自己写函数. 
+
+### 同步寄存器
+
+先看一眼`am`的实现
+```c
+#define SYNC_ADDR (VGACTL_ADDR + 4)
+
+void __am_gpu_fbdraw(AM_GPU_FBDRAW_T *ctl) {
+  if (ctl->sync) {
+    outl(SYNC_ADDR, 1);
+  }// 一眼丁真, 这里显然使用了之前没有使用过的高4 byte
+}
+```
+
+> 补充: `uintptr_t` might be the same size as a `void*`. It might be larger. It could conceivably be smaller, although such a C++ implementation approaches perverse. For example on some hypothetical platform where `void*` is 32 bits, but only 24 bits of virtual address space are used, you could have a 24-bit `uintptr_t` which satisfies the requirement. I don't know why an implementation would do that, but the standard permits it. \
+
+下面是一个正确的`native`
+![](assets/Pasted%20image%2020240730160913.png)
+
+
+```c
+void vga_update_screen() {
+  // TODO: call `update_screen()` when the sync register is non-zero,
+  // then zero out the sync register
+  if(vgactl_port_base[1]){
+    vgactl_port_base[1] = 0; // clear the sync register
+  }
+}
+
+void init_vga() {
+
+  vmem = new_space(screen_size());
+  add_mmio_map("vmem", CONFIG_FB_ADDR, vmem, screen_size(), NULL);
+  //这部分回调函数应该更新屏幕, 但是这里没有更新. 
+  IFDEF(CONFIG_VGA_SHOW_SCREEN, init_screen());
+  IFDEF(CONFIG_VGA_SHOW_SCREEN, memset(vmem, 0, screen_size()));
+}
+```
+
+注意看`test`是因为, 这里边蕴含了我们需要的长宽信息.
+```c
+void __am_gpu_fbdraw(AM_GPU_FBDRAW_T *ctl) {
+  uint32_t *const fb = (uint32_t *)(uintptr_t)FB_ADDR; // locate buffer
+  if (ctl->sync)
+    outl(SYNC_ADDR, 1);
+  // write to buffer, line first
+  for (int i = ctl->y; i < ctl->y + ctl->h; i++)
+    for (int j = ctl->x; j < ctl->x + ctl->w; j++)
+      fb[i * vga_width + j] =
+          ((uint32_t *)ctl->pixels)[(i - ctl->y) * ctl->w + (j - ctl->x)];
+  //      io_write(AM_GPU_FBDRAW, x * w, y * h, color_buf, w, h, false);
+}
+```
+我们实现的时候如何知道`x,y`和`w,h`的对饮关系? 
+```c
+io_write(AM_GPU_FBDRAW, x * w, y * h, color_buf, w, h, false);
+```
+这里就有了, 每次画一个色块. 
+`x`是宽方向的内容, `y`是高方向的内容; 因此首先行计数, 然后列计数. 
+
+> 上面的实现是有`bug`的, 我们应该等待绘制结束之后, 再去更新同步状态. 因为更新同步状态是面向硬件的, 他不会等待你里边指令执行结束之后才进行. 下面的实现才是正确的. 
+```c
+void __am_gpu_fbdraw(AM_GPU_FBDRAW_T *ctl) {
+  uint32_t *const fb = (uint32_t *)(uintptr_t)FB_ADDR; // locate buffer
+  // write to buffer, line first
+  for (int i = ctl->y; i < ctl->y + ctl->h; i++)
+    for (int j = ctl->x; j < ctl->x + ctl->w; j++)
+      fb[i * vga_width + j] =
+          ((uint32_t *)ctl->pixels)[(i - ctl->y) * ctl->w + (j - ctl->x)];
+  //      ref: io_write(AM_GPU_FBDRAW, x * w, y * h, color_buf, w, h, false);
+
+  if (ctl->sync)
+    outl(SYNC_ADDR, 1);
+}
+```
+
+
+![](assets/Pasted%20image%2020240730165506.png)
+
+
+实现之后, 就可以放一下有意思的了
+
+![](assets/Pasted%20image%2020240730172115.png)
+
+-- -- 
+## TODO: 声卡
+
+-- -- 
+
+## 打字小游戏
+
+> 请你以打字小游戏为例, 结合"程序在计算机上运行"的两个视角, 来剖析打字小游戏究竟是如何在计算机上运行的. 具体地, 当你按下一个字母并命中的时候, 整个计算机系统(NEMU, ISA, AM, 运行时环境, 程序) 是如何协同工作, 从而让打字小游戏实现出"命中"的游戏效果?
+
+### `font.c`与`game.c`
+这两个会被`cross compiler`编译为`riscv32`的程序, 并且按照框架中给定的`*.ld`链接为符合`nemu`可以处理的指令. 
+
+### `main`
+```c
+ioe_init();
+video_init();
+
+io_read(...)
+```
+这部分是`am`的内容, `am`提供与硬件`nemu`交互的接口. 比如我们刚刚所做的`video_init`部分, 这里其实都是已经编译好的指令, 我们可以理解为一个和硬件交互的库, 这里的交互就是和`IO`外设交互的库. 他们并不是在`nemu`中实现的, 而是同样运行在`nemu`中的
+
+### `Klib`
+```c
+printf("Type 'ESC' to exit\n");
+```
+这里的`printf`可并不是`glibc`或者`libc`中链接过去的`printf`. 这是运行在`nemu`中的`printf`. 实际上是运行在裸机的`printf`. 
+
+### 其他函数
+
+至于游戏中的其他函数, 也就是正常的函数调用. 但注意, 这些都是运行在`nemu`中的, 也就是说我们可以通过`ftrace`追踪到的. 
+
+非常奇妙, 我们的抽象层级也一步一步的变化. 
+
+-- -- 
+## `nemu`中的`nemu`
+
+这里的抽象层级又变化了. `nemu`相当于一个`TRM + IOE`, 我们在这上面运行一个`nemu`模拟器, 然后在`nemu`模拟器里边还可以继续运行程序. Crazy. 
+
+> 这就类似于在`qemu`运行一个`debian12`, 再在这个`debian12`的`qemu`中运行一个`archlinux`.
+
+-- -- 
 ## `Klib`- 编写可移植的程序
 
 > 为了不损害程序的可移植性, 你编写程序的时候不能再做一些架构相关的假设了, 比如"指针的长度是4字节"将不再成立, 因为在`native`上指针长度是8字节, 按照这个假设编写的程序, 在`native`上运行很有可能会触发段错误.
 > 
 > 当然, 解决问题的方法还是有的, 至于要怎么做, 老规矩, STFW吧.
+
+
+-- -- 
+
+## 必答题(选)
+
+> 有些太简单了我就懒得写了
+
+### `inline` and `static`
+编译与链接 在`nemu/include/cpu/ifetch.h`中, 你会看到由`static inline`开头定义的`inst_fetch()`函数. 分别尝试去掉`static`, 去掉`inline`或去掉两者, 然后重新进行编译, 你可能会看到发生错误. 请分别解释为什么这些错误会发生/不发生? 你有办法证明你的想法吗?
+
+这个有点意思. 实际上`C`和`CPP`中的`inline`还不是一回事. 
+
+[参考cppreference](https://en.cppreference.com/w/c/language/inline)
+
+`inline`蕴含了静态属性, 也就是链接时外部不可见. 
+> If a non-static function is declared `inline`, then it must be defined in the same translation unit. The inline definition that does not use `extern` is not externally visible and does not prevent other translation units from defining the same function. <u>This makes the `**inline**` keyword an alternative to `static` for defining functions inside header files, which may be included in multiple translation units of the same program</u>.
+
+> Each translation unit may have zero or one external definition of every identifier with [internal linkage](https://en.cppreference.com/w/c/language/storage_duration "c/language/storage duration") (a `static` global).
+> 
+> If an identifier with internal linkage is used in any expression other than a non-VLA,(since C99) [`sizeof`](https://en.cppreference.com/w/c/language/sizeof "c/language/sizeof"), [`_Alignof`](https://en.cppreference.com/w/c/language/_Alignof "c/language/ Alignof")(since C11), or [`typeof`](https://en.cppreference.com/w/c/language/typeof "c/language/typeof")(since C23), <u>there must be one and only one external definition for that identifier in the translation unit</u>.
+> 
+> The entire program may have zero or one external definition of every identifier with [external linkage](https://en.cppreference.com/w/c/language/storage_duration "c/language/storage duration").
+> 
+> If an identifier with external linkage is used in any expression other than a non-VLA,(since C99) [`sizeof`](https://en.cppreference.com/w/c/language/sizeof "c/language/sizeof"), [`_Alignof`](https://en.cppreference.com/w/c/language/_Alignof "c/language/ Alignof")(since C11), or [`typeof`](https://en.cppreference.com/w/c/language/typeof "c/language/typeof")(since C23), there must be one and only one external definition for that identifier somewhere in the entire program.
+>
+> inline definitions in different translation units are not constrained by one definition rule. See [`inline`](https://en.cppreference.com/w/c/language/inline "c/language/inline") for the details on the inline function definitions.
+
+
+The `inline` keyword was adopted from C++, but in C++, if a function is declared `inline`, it must be declared `inline` in every translation unit, and also every definition of an inline function must be exactly the same 
+
+(in C, the definitions may be different, and depending on the differences only results in unspecified behavior). On the other hand, C++ allows non-const function-local statics and all function-local statics from different definitions of an inline function are the same in C++ but distinct in C.
+
+
+
+在这里的话, 我们可以去掉`static'`, 但是不能去掉`inline`. 
+
+### `volatile`
+编译与链接
+1. 在`nemu/include/common.h`中添加一行`volatile static int dummy;` 然后重新编译NEMU. 请问重新编译后的NEMU含有多少个`dummy`变量的实体? 你是如何得到这个结果的?
+2. 添加上题中的代码后, 再在`nemu/include/debug.h`中添加一行`volatile static int dummy;` 然后重新编译NEMU. 请问此时的NEMU含有多少个`dummy`变量的实体? 与上题中`dummy`变量实体数目进行比较, 并解释本题的结果.
+3. 修改添加的代码, 为两处`dummy`变量进行初始化:`volatile static int dummy = 0;` 然后重新编译NEMU. 你发现了什么问题? 为什么之前没有出现这样的问题? (回答完本题后可以删除添加的代码.)
+```c
+//sv.h
+static  volatile int a = 0;
+```
+
+```c
+//test1.c
+
+#include "sv.h"
+#include <stdio.h>
+
+int func(){
+  printf("func: [%p] %d\n", &a, a);
+  return 0;
+}
+
+```
+
+```c
+//test.c
+
+#include<stdio.h>
+#include "sv.h"
+extern int func(); 
+
+int main(){
+  printf("Hello world\n");
+  printf("[%p] %d\n", &a, a);
+  func();
+}
+```
+
+![](assets/Pasted%20image%2020240730183534.png)
+这个地方实际上`volatile`应该没啥卵用, 可能是担心编译器优化掉这个没有使用的变量? 主要是`static`. 实际上我们只要知道预处理之后的文件, 有一个`static int a`, 那么只在当前编译单元可见. 因此这个头文件被包含几次, 那么就有几个. 
+
+```shell
+grep  -E '\s*#include\s*["<]debug.h[">]\s*' ./ -r | count
+
+# output 2
+```
+
+```shell
+grep  -E '\s*#include\s*["<]common.h[">]\s*' ./ -r | count
+
+# output 44
+```
+
+当然如果定义就有问题了, 因为`debug.h`与`common.h`互相包含.  然后就多重定义了. 如果不赋值, 可以当做声明, 所以没问题. 
+
+```c
+#include "sv.h"
+#include <stdio.h>
+int func();
+int func();
+int func();
+int func();
+int func();
+int func();
+int func();
+int func();
+
+static volatile int a = 0;
+int main() {
+  printf("Hello world\n");
+  printf("[%p] %d\n", &a, a);
+  func();
+}
+```
+类似于我们可以这样声明多次. 
+
+
+### `Makefile`
+了解Makefile 请描述你在`am-kernels/kernels/hello/`目录下敲入`make ARCH=$ISA-nemu` 后, `make`程序如何组织.c和.h文件, 最终生成可执行文件`am-kernels/kernels/hello/build/hello-$ISA-nemu.elf`. (这个问题包括两个方面:`Makefile`的工作方式和编译链接的过程.)
+
+### ARCHITECTURE
+
+```makefile
+ARCH_SPLIT = $(subst -, ,$(ARCH)) # 替换-为空格
+ISA        = $(word 1,$(ARCH_SPLIT)) # 分词 1
+PLATFORM   = $(word 2,$(ARCH_SPLIT)) # 分词 2
+```
+
+```makefile
+# OBJS就是所有源文件的.o形式, 这里通过加前缀拼接形成路径. 
+OBJS      = $(addprefix $(DST_DIR)/, $(addsuffix .o, $(basename $(SRCS))))
+
+# lazy evaluation ("=") causes infinite recursions
+# 这里在原有LIBS基础上加上am klib这两个lib
+LIBS     := $(sort $(LIBS) am klib) 
+
+LINKAGE   = $(OBJS) \
+  $(  addsuffix -$(ARCH).a, \
+	$(join \
+    $(addsuffix /build/, $(addprefix $(AM_HOME)/, $(LIBS))), \
+    $(LIBS) )  )
+```
+
+```makefile
+# 这里通过后续制定交叉编译对应的编译器和binutils
+AS        = $(CROSS_COMPILE)gcc
+CC        = $(CROSS_COMPILE)gcc
+CXX       = $(CROSS_COMPILE)g++
+LD        = $(CROSS_COMPILE)ld
+AR        = $(CROSS_COMPILE)ar
+OBJDUMP   = $(CROSS_COMPILE)objdump
+OBJCOPY   = $(CROSS_COMPILE)objcopy
+READELF   = $(CROSS_COMPILE)readelf
+```
+
+```makefile
+# 这部分就是为不同架构制定不同规则
+-include $(AM_HOME)/scripts/$(ARCH).mk
+```
+
+`$(dir names…)`[](https://www.gnu.org/software/make/manual/html_node/File-Name-Functions.html#index-dir)
+
+Extracts the directory-part of each file name in names. The directory-part of the file name is everything up through (and including) the last slash in it. If the file name contains no slash, the directory part is the string ‘./’. For example,
+```makefile
+$(dir src/foo.c hacks)
+```
+
+produces the result `src/ ./`
+
+```makefile
+### Rule (compile): a single `.c` -> `.o` (gcc)
+$(DST_DIR)/%.o: %.c
+	@mkdir -p $(dir $@) && echo + CC $<
+	@$(CC) -std=gnu11 $(CFLAGS) -c -o $@ $(realpath $<)
+
+### Rule (compile): a single `.cc` -> `.o` (g++)
+$(DST_DIR)/%.o: %.cc
+	@mkdir -p $(dir $@) && echo + CXX $<
+	@$(CXX) -std=c++17 $(CXXFLAGS) -c -o $@ $(realpath $<)
+
+### Rule (compile): a single `.cpp` -> `.o` (g++)
+$(DST_DIR)/%.o: %.cpp
+	@mkdir -p $(dir $@) && echo + CXX $<
+	@$(CXX) -std=c++17 $(CXXFLAGS) -c -o $@ $(realpath $<)
+
+### Rule (compile): a single `.S` -> `.o` (gcc, which preprocesses and calls as)
+$(DST_DIR)/%.o: %.S
+	@mkdir -p $(dir $@) && echo + AS $<
+	@$(AS) $(ASFLAGS) -c -o $@ $(realpath $<)
+
+### Rule (recursive make): build a dependent library (am, klib, ...)
+$(LIBS): %:
+	@$(MAKE) -s -C $(AM_HOME)/$* archive
+
+### Rule (link): objects (`*.o`) and libraries (`*.a`) -> `IMAGE.elf`, the final ELF binary to be packed into image (ld)
+$(IMAGE).elf: $(OBJS) $(LIBS)
+	@echo + LD "->" $(IMAGE_REL).elf
+	@$(LD) $(LDFLAGS) -o $(IMAGE).elf --start-group $(LINKAGE) --end-group
+
+### Rule (archive): objects (`*.o`) -> `ARCHIVE.a` (ar)
+$(ARCHIVE): $(OBJS)
+	@echo + AR "->" $(shell realpath $@ --relative-to .)
+	@$(AR) rcs $(ARCHIVE) $(OBJS)
+
+### Rule (`#include` dependencies): paste in `.d` files generated by gcc on `-MMD`
+-include $(addprefix $(DST_DIR)/, $(addsuffix .d, $(basename $(SRCS))))
+```
+
+这一步会编译每个文件, 然后build静态库, 最后`link`, 以及生成镜像. 最后根据目标, 调用`nemu`的时候传递不同的参数, 实际上这个`makefile`被多次复用. 
+
+

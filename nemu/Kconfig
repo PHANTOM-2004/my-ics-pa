@@ -199,6 +199,21 @@ config FTRACE_STACK_SIZE
   int "Set call stack size"
   default 8192
 
+config DTRACE
+  depends on TRACE && TARGET_NATIVE_ELF && ENGINE_INTERPRETER 
+  bool "Enable device trace"
+  default y
+
+config DTRACE_READ
+  depends on DTRACE
+  bool "Enable device read trace"
+  default y
+
+config DTRACE_WRITE
+  depends on DTRACE
+  bool "Enable device write trace"
+  default y
+
 config DIFFTEST
   depends on TARGET_NATIVE_ELF
   bool "Enable differential testing"

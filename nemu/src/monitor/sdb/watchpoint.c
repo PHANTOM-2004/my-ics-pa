@@ -119,7 +119,7 @@ int wp_insert(char *_expr) {
   bool success = true;
   _new_node->w_expr = (char *)malloc(sizeof(char) * (len + 1));
   Log("wp_insert: malloc %d", (int)sizeof(char) * (int)(len + 1));
-  strncpy(_new_node->w_expr, _expr, len);
+  strncpy(_new_node->w_expr, _expr, len + 1);
   _new_node->w_expr[len] = '\0';
   _new_node->val = expr(_new_node->w_expr, &success);
   if(!success){

@@ -29,9 +29,10 @@ static inline bool is_placeholder(char const ch) {
 
 int printf_base(char *out, char const *fmt, size_t const n,
                 string_handler_t shandler, va_list ap) {
-
+  // TODO: add bit width function, and better logic
   int ret = 0;
   int val_int = 0;
+  char val_char = 0;
   size_t cnt = 0;
   char buffer[STRING_BUFFER_SIZE] = "\0";
   char *buf_pos;
@@ -81,6 +82,12 @@ int printf_base(char *out, char const *fmt, size_t const n,
       src_length = strlen(src_pos);
       break;
 
+    case 'c':
+      val_char = (char)va_arg(ap, int);
+      src_pos = &val_char;
+      src_length = 1;
+      break;
+
     case '%':
       src_pos = p;
       src_length = 1;
@@ -96,6 +103,14 @@ int printf_base(char *out, char const *fmt, size_t const n,
 
     default: // not %
 
+      if (*p > '0' && *p <= '9') {
+        width = *p - '0';
+        p--;
+        go_to_switch = true;
+        continue;
+      }
+
+      printf("%s\n", fmt);
       panic("Not implemented");
     }
     // now write to buffer/stdout

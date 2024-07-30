@@ -58,6 +58,10 @@ word_t map_read(paddr_t addr, int len, IOMap *map) {
   paddr_t offset = addr - map->low;
   invoke_callback(map->callback, offset, len, false); // prepare data to read
   word_t ret = host_read(map->space + offset, len);
+#if defined(CONFIG_DTRACE) && defined(CONFIG_DTRACE_READ)
+  Log("[DREAD %s] data:["FMT_WORD"] at offset [%08x] in [%08x, %08x)", 
+      map->name, ret, offset, map->low, map->high);
+#endif
   return ret;
 }
 
@@ -65,6 +69,10 @@ void map_write(paddr_t addr, int len, word_t data, IOMap *map) {
   assert(len >= 1 && len <= 8);
   check_bound(map, addr);
   paddr_t offset = addr - map->low;
+#if defined(CONFIG_DTRACE) && defined(CONFIG_DTRACE_WRITE)
+  Log("[DWRITE %s] write [%d byte]"FMT_WORD" offset [%08x] in [%08x, %08x)",map->name, 
+      len, data, offset, map->low, map->high);
+#endif
   host_write(map->space + offset, len, data);
   invoke_callback(map->callback, offset, len, true);
 }

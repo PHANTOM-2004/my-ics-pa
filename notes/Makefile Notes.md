@@ -183,5 +183,25 @@ clean:
 - Compiling a C++ program: `n.o` is made automatically from `n.cc` or `n.cpp` with a command of the form `$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) $^ -o $@`
 - Linking a single object file: `n` is made automatically from `n.o` by running the command `$(CC) $(LDFLAGS) $^ $(LOADLIBES) $(LDLIBS) -o $@`
 
+## 赋值
+
+There are two flavors of variables:
+
+- recursive (use `=`) - only looks for the variables when the command is _used_, not when it's _defined_.
+- simply expanded (use `:=`) - like normal imperative programming -- only those defined so far get expanded
+
+
 当然规则还有很多, 这么多对于阅读应该没什么问题了. 
+
+
 -- -- 
+
+## `MAKECMDGOALS`
+```makefile
+ifeq ($(MAKECMDGOALS),)
+  MAKECMDGOALS  = image
+  .DEFAULT_GOAL = image
+endif
+```
+这个就是命令行接收到的目标, `.DEFAULT_GOAL`也是特殊变量. 顾名思义. 
+
