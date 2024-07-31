@@ -2,151 +2,278 @@
 #include <klib-macros.h>
 #include <klib.h>
 #include <stdarg.h>
+#include <stdio.h>
 
 #if !defined(__ISA_NATIVE__) || defined(__NATIVE_USE_KLIB__)
 
 #define STRING_BUFFER_SIZE 30
+#define STDOUT_BUFFER_SIZE 10
 
-typedef void (*string_handler_t)(char *, char const *, size_t);
+#define min(a, b) (a) < (b) ? (a) : (b)
 
-static inline void str_write_to_buffer(char *out, char const *in, size_t size) {
-  assert(out);
-  assert(in);
-  memcpy(out, in, size);
+typedef struct {
+  size_t width;
+  size_t buffer_filled_len;
+  size_t total_out_len;
+  size_t const max_out_len;
+
+  size_t cur_out_len;
+  char filler;
+  bool is_conversion;
+  bool is_flag;
+
+  char const *cur_out_str;
+  char *const out_dst;
+
+  char str_buffer[STRING_BUFFER_SIZE];
+  int val_int;
+  unsigned val_uint;
+  char val_char;
+} printfParser;
+
+typedef void (*buffer_handler_t)(printfParser *const _this);
+
+static void flush_buffer(printfParser *const _this) {
+  for (size_t i = 0; i < _this->buffer_filled_len; i++)
+    putch(_this->out_dst[i]);
+  _this->buffer_filled_len = 0;
 }
 
-static inline void str_write_to_stdout(char *out, char const *in, size_t size) {
-  assert(out == NULL); // out is stdout
-  assert(in);
-  size_t cnt = 0;
-  while (*in && cnt++ < size)
-    putch(*in++);
+static inline bool is_buffer_full(printfParser const *const _this) {
+  return _this->buffer_filled_len >= STDOUT_BUFFER_SIZE - 1;
 }
 
-static inline bool is_placeholder(char const ch) {
-  return ch == 'd' || ch == 's' || ch == 'f';
+static inline bool reach_maxlen(printfParser const *const _this) {
+  return _this->total_out_len > _this->max_out_len;
 }
 
-int printf_base(char *out, char const *fmt, size_t const n,
-                string_handler_t shandler, va_list ap) {
-  // TODO: add bit width function, and better logic
-  int ret = 0;
-  int val_int = 0;
-  char val_char = 0;
-  size_t cnt = 0;
-  char buffer[STRING_BUFFER_SIZE] = "\0";
-  char *buf_pos;
+static inline void fill_buffer(printfParser *const _this, char const ch) {
+  _this->out_dst[_this->buffer_filled_len++] = ch;
+}
 
-  char const *src_pos = NULL;
-  size_t src_length = 0;
-  char filler = ' ';
-  int width = 0;
+static inline void str_write_to_buffer(printfParser *const _this) {
+  assert(_this->out_dst);
+  assert(_this->cur_out_str);
 
-  bool go_to_switch = false;
-
-  for (char const *p = fmt; cnt <= n && *p; p++) {
-    if (*p != '%' && !go_to_switch) {
-      src_pos = p;
-      src_length = 1;
-
-      if (cnt + src_length > n)
-        src_length = n - cnt;
-
-      shandler(out, src_pos, src_length);
-      if (out)
-        out += src_length;
-      ret += src_length, cnt += src_length;
-      continue;
+  if (_this->cur_out_len < _this->width) {
+    size_t const fill_len = _this->width - _this->cur_out_len;
+    for (size_t i = 0; !reach_maxlen(_this) && i < fill_len; i++) {
+      _this->out_dst[_this->total_out_len++] = _this->filler;
     }
-
-    go_to_switch = false;
-    p++;
-    switch (*p) {
-    case 'd':
-      /*This is for int type*/
-      val_int = va_arg(ap, int);
-      src_length = 0;
-      buf_pos = buffer + STRING_BUFFER_SIZE - 1;
-      do {
-        *buf_pos = val_int % 10 + '0';
-        val_int /= 10;
-        src_length++;
-        buf_pos--;
-      } while (val_int);
-
-      src_pos = buf_pos + 1;
-      break;
-
-    case 's':
-      src_pos = va_arg(ap, char const *);
-      src_length = strlen(src_pos);
-      break;
-
-    case 'c':
-      val_char = (char)va_arg(ap, int);
-      src_pos = &val_char;
-      src_length = 1;
-      break;
-
-    case '%':
-      src_pos = p;
-      src_length = 1;
-      break;
-
-    case '0': // it is flag after '%'
-      go_to_switch = true;
-      filler = '0';           // if not just ignore witdh = 0
-      width = *(p + 1) - '0'; // TODO: simply suppose it one bit width
-      continue;
-
-      break;
-
-    default: // not %
-
-      if (*p > '0' && *p <= '9') {
-        width = *p - '0';
-        p--;
-        go_to_switch = true;
-        continue;
-      }
-
-      printf("%s\n", fmt);
-      panic("Not implemented");
-    }
-    // now write to buffer/stdout
-
-    if (cnt + src_length > n)
-      src_length = n - cnt;
-
-    if (src_length < width)
-      for (int i = 0; i < width - src_length; i++)
-        shandler(out, &filler, 1);
-
-    shandler(out, src_pos, src_length);
-
-    int const step = src_length < width ? width : src_length;
-    if (out)
-      out += step;
-    ret += step, cnt += step;
   }
-  if (out)
-    *out = '\0'; // at last is a NULL terminator
 
-  assert((size_t)ret <= n);
-  return ret;
+  size_t const cp_len = reach_maxlen(_this)
+                            ? 0
+                            : (min(_this->max_out_len - _this->total_out_len,
+                                   _this->cur_out_len));
+  memcpy(_this->out_dst + _this->total_out_len, _this->cur_out_str, cp_len);
+  _this->total_out_len += cp_len;
+}
+
+static void str_write_to_stdout(printfParser *const _this) {
+  assert(_this->out_dst);
+  assert(_this->cur_out_str);
+  size_t cnt = 0;
+  char const *p = _this->cur_out_str;
+
+  //
+  if (_this->cur_out_len < _this->width) {
+    size_t const fill_len = _this->width - _this->cur_out_len;
+    for (size_t i = 0; !reach_maxlen(_this) && i < fill_len; i++) {
+      if (is_buffer_full(_this))
+        flush_buffer(_this);
+      fill_buffer(_this, _this->filler);
+      _this->total_out_len++;
+    }
+  }
+
+  while (*p && !reach_maxlen(_this) && cnt < _this->cur_out_len) {
+    // when the buffer is filled
+    if (is_buffer_full(_this))
+      flush_buffer(_this);
+
+    // write to buffer
+    fill_buffer(_this, *p);
+
+    // if there is a '\n'
+    if (*p == '\n')
+      flush_buffer(_this);
+
+    _this->total_out_len++;
+    cnt++;
+    p++;
+  }
+}
+
+static inline bool is_conversion(char const ch) {
+  // these type are trivial integer
+  return ch == 'd' || ch == 's' || ch == 'u' || ch == 'x' || ch == 'p' ||
+         ch == 'f';
+}
+
+static inline bool is_flag(char const ch) { return ch == '0'; }
+
+static inline int itohex(int const num) {
+  assert(num >= 0 && num < 16);
+  if (num < 10)
+    return num + '0';
+  return num - 10 + 'a';
+}
+
+// return the length
+static void _itoa(printfParser *const _this) {
+  int length = 0;
+  char *buf_pos = _this->str_buffer + STRING_BUFFER_SIZE - 1;
+
+  do {
+    *buf_pos = _this->val_int % 10 + '0';
+    _this->val_int /= 10;
+    length++;
+    buf_pos--;
+  } while (_this->val_int);
+
+  _this->cur_out_len = length;
+  _this->cur_out_str = buf_pos + 1;
+}
+
+static void _utoa(printfParser *const _this, unsigned const base) {
+  int length = 0;
+  char *buf_pos = _this->str_buffer + STRING_BUFFER_SIZE - 1;
+  do {
+    *buf_pos = (char)itohex(_this->val_uint % base);
+    _this->val_uint /= base;
+    length++;
+    buf_pos--;
+  } while (_this->val_uint);
+
+  _this->cur_out_len = length;
+  _this->cur_out_str = buf_pos + 1;
+}
+
+static char const *parse_format(printfParser *const parser, char const *p) {
+  if (*p != '%') {
+    parser->cur_out_str = p;
+    parser->cur_out_len = 1;
+    // NOTE: reset here
+    parser->width = 0;
+    parser->filler = ' ';
+    p++;
+  } else {
+    // parser things after %
+    p++;
+    assert(*p); // else invalid expression
+
+    // if conversion
+    parser->is_conversion = is_conversion(*p);
+    parser->width = 0;
+    if (parser->is_conversion)
+      return p;
+
+    // now read flag
+    parser->is_flag = is_flag(*p);
+    parser->filler = ' ';
+    if (parser->is_flag) {
+      parser->filler = *p; // TODO: only consider filler
+      p++;
+    }
+
+    // now read witdh
+    assert(*p && isdigit(*p));
+    parser->width = atoi(p);
+
+    while (!is_conversion(*p)) {
+      assert(isdigit(*p));
+      p++;
+    }
+    // then it is conversion
+    parser->is_conversion = true; // p point to conversion
+  }
+
+  return p;
+}
+
+static int _printf_base(char *out, char const *fmt, size_t const n,
+                        buffer_handler_t bhandler, va_list ap) {
+  printfParser parser[1] = {{
+      .width = 0,
+      .filler = ' ',
+      .buffer_filled_len = 0,
+      .is_conversion = false,
+      .is_flag = false,
+      .total_out_len = 0,
+      .max_out_len = n,
+      .cur_out_len = 0,
+      .cur_out_str = NULL,
+      .out_dst = out,
+  }};
+
+  for (char const *p = fmt; *p;) {
+    if (parser->is_conversion) {
+      parser->is_conversion = false;
+      // parse conversion
+      switch (*p) {
+      case 'd':
+        /*This is for int type*/
+        parser->val_int = va_arg(ap, int);
+        _itoa(parser);
+        break;
+
+      case 's':
+        parser->cur_out_str = va_arg(ap, char const *);
+        parser->cur_out_len = strlen(parser->cur_out_str);
+        break;
+
+      case 'c':
+        parser->val_char = (char)va_arg(ap, int);
+        parser->cur_out_str = &parser->val_char;
+        parser->cur_out_len = 1;
+        break;
+
+      case 'u':
+        parser->val_uint = va_arg(ap, unsigned int);
+        _utoa(parser, 10);
+        break;
+
+      case 'x':
+      case 'X':
+        parser->val_uint = va_arg(ap, unsigned int);
+        _utoa(parser, 16);
+        break;
+
+      default: // not %
+        putch('\n');
+        putch(*p);
+        putch('\n');
+        panic("Not implemented");
+      }
+      // go to next
+      p++;
+    } else {
+      p = parse_format(parser, p);
+      if (parser->is_conversion)
+        continue;
+    }
+    // write to dst
+    bhandler(parser);
+  }
+
+  flush_buffer(parser);
+  return (int)parser->total_out_len;
 }
 
 int vsprintf(char *out, const char *fmt, va_list ap) {
   assert(out);
   assert(fmt);
-  int const ret = printf_base(out, fmt, -1, str_write_to_buffer, ap);
+  int const ret = _printf_base(out, fmt, -1, str_write_to_buffer, ap);
+  out[ret] = '\0';
   return ret;
 }
 
 int printf(const char *fmt, ...) {
   va_list arguments;
   va_start(arguments, fmt);
-  int const ret = printf_base(NULL, fmt, -1, str_write_to_stdout, arguments);
+  char buffer[STDOUT_BUFFER_SIZE];
+  int const ret = _printf_base(buffer, fmt, -1, str_write_to_stdout, arguments);
   va_end(arguments);
   return ret;
 }
@@ -182,7 +309,8 @@ int sprintf(char *out, const char *fmt, ...) {
 
   va_list arguments;
   va_start(arguments, fmt);
-  int const ret = printf_base(out, fmt, -1, str_write_to_buffer, arguments);
+  int const ret = _printf_base(out, fmt, -1, str_write_to_buffer, arguments);
+  out[ret] = '\0';
   va_end(arguments);
   return ret;
 }
@@ -192,7 +320,8 @@ int snprintf(char *out, size_t n, const char *fmt, ...) {
   assert(fmt);
   va_list arguments;
   va_start(arguments, fmt);
-  int const ret = printf_base(out, fmt, n, str_write_to_buffer, arguments);
+  int const ret = _printf_base(out, fmt, n - 1, str_write_to_buffer, arguments);
+  out[n] = '\0';
   va_end(arguments);
   return ret;
 }
@@ -200,7 +329,8 @@ int snprintf(char *out, size_t n, const char *fmt, ...) {
 int vsnprintf(char *out, size_t n, const char *fmt, va_list ap) {
   assert(out);
   assert(fmt);
-  int const ret = printf_base(out, fmt, n, str_write_to_buffer, ap);
+  int const ret = _printf_base(out, fmt, n - 1, str_write_to_buffer, ap);
+  out[n] = '\0';
   return ret;
 }
 
