@@ -192,7 +192,7 @@ static int cmd_x(char *args) {
   }
 
   //
-  Log("read memory: [" FMT_WORD "-" FMT_WORD "]", addr, addr + _number - 1);
+  Log("read memory: [" FMT_PADDR "-" FMT_PADDR "]", addr, addr + _number - 1);
   if (!likely(in_pmem(addr)) || !likely(in_pmem(addr + _number - 1))) {
     Log(CMD_ERROR_OUTPUT_FMT, "x", "out of range");
     return 0;

@@ -20,13 +20,13 @@ void print_ftrace() {
   int space = 2;
   for (int i = 0; i < stk_ptr; i++) {
     if (call_stack[i].status == CALL) {
-      printf("%08x", call_stack[i].pc);
+      printf(FMT_PADDR, call_stack[i].pc);
       printws(space);
-      printf("call [%s@%08x]\n", call_stack[i].func->name,
+      printf("call [%s@" FMT_PADDR "]\n", call_stack[i].func->name,
              call_stack[i].func->value);
       space++;
     } else {
-      printf("%08x", call_stack[i].pc);
+      printf(FMT_PADDR, call_stack[i].pc);
       printws(space);
       printf("ret [%s]\n", call_stack[i].func->name);
       space--;
@@ -65,7 +65,7 @@ void ftrace(Decode const *const s) {
     // add to call stack
 
     func = get_elffunction(s->dnpc);
-    Log("call@[%08x@%s]", s->dnpc, func->name);
+    // Log("call@[" FMT_PADDR "@%s]", s->dnpc, func->name);
     Assert(func, "get elffunction cannot be NULL");
     // Log("%08x %s", s->pc, disassemble);
 
@@ -82,7 +82,7 @@ void ftrace(Decode const *const s) {
     func = get_elffunction(s->dnpc);
     Assert(func, "get elffunction cannot be NULL");
     // Log("%08x %s", s->pc, disassemble);
-    Log("ret@[%08x] %s", s->dnpc, func->name);
+    //Log("ret@[%08x] %s", s->dnpc, func->name);
 
     call_stack[stk_ptr].func = func;
     call_stack[stk_ptr].pc = s->pc;
