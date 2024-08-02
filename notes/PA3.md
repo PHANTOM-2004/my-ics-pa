@@ -193,4 +193,23 @@ Context *simple_trap(Event ev, Context *ctx) {
 
 > 从`yield test`调用`yield()`开始, 到从`yield()`返回的期间, 这一趟旅程具体经历了什么? 软(AM, `yield test`)硬(NEMU)件是如何相互协助来完成这趟旅程的? 你需要解释这一过程中的每一处细节, 包括涉及的每一行汇编代码/C代码的行为, 尤其是一些比较关键的指令/变量. 事实上, 上文的必答题"理解上下文结构体的前世今生"已经涵盖了这趟旅程中的一部分, 你可以把它的回答包含进来.
 
+- `call yield`
+在这一步中, 我们首先在`a7`中保存了一个`-1`, 然后`ecall`. 
+
+```c
+void yield() {
+#ifdef __riscv_e
+  asm volatile("li a5, -1; ecall");
+#else
+  asm volatile("li a7, -1; ecall");
+#endif
+}
+```
+
+- `nemu`执行`ecall`
+```c
+ INSTPAT("0000000 00000 00000 000 00000 11100 11", ecall, N,
+          s->dnpc = isa_raise_intr(-1, s->pc)); // pc of current instruction
+```
+这里也是有点意思, 我们设置`epc`, 返回中断向量. 不过这个时候, 我们的`NO`从哪里来呢? 
 ## 

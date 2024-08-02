@@ -22,7 +22,7 @@ bool isa_difftest_checkregs(CPU_state *ref_r, vaddr_t pc) {
   for (int i = 0; i < 32; i++) {
     if (ref_r->gpr[i] == gpr(i))
       continue;
-    Log("[%2d] DUT: [%08x] %s REF: [%08x]", i, gpr(i),
+    Log("[%2d] DUT: [" FMT_WORD "] %s REF: [" FMT_WORD "]", i, gpr(i),
         ANSI_FMT("NOT EQUAL", ANSI_FG_RED), ref_r->gpr[i]);
     return false;
   }
