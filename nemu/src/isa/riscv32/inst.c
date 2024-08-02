@@ -14,6 +14,7 @@
  ***************************************************************************************/
 
 #include "common.h"
+#include "isa.h"
 #include "local-include/reg.h"
 #include <cpu/cpu.h>
 #include <cpu/decode.h>
@@ -31,6 +32,7 @@ enum {
   TYPE_B,
   TYPE_J,
   TYPE_R,
+  TYPE_CSR,
 };
 
 #define src1R()                                                                \
@@ -40,6 +42,10 @@ enum {
 #define src2R()                                                                \
   do {                                                                         \
     *src2 = R(rs2);                                                            \
+  } while (0)
+#define srcCSR()                                                               \
+  do {                                                                         \
+    *_csr = csr(*_csr_addr);                                                   \
   } while (0)
 #define immI()                                                                 \
   do {                                                                         \
@@ -67,10 +73,12 @@ enum {
   } while (0)
 
 static void decode_operand(Decode *s, int *rd, word_t *src1, word_t *src2,
-                           word_t *imm, int type) {
+                           int *_csr_addr, word_t *_csr, word_t *imm,
+                           int type) {
   word_t const i = s->isa.inst.val;
   int rs1 = BITS(i, 19, 15);
   int rs2 = BITS(i, 24, 20);
+  *_csr_addr = BITS(i, 31, 20); // csr address
   *rd = BITS(i, 11, 7);
   switch (type) {
   case TYPE_I:
@@ -97,6 +105,12 @@ static void decode_operand(Decode *s, int *rd, word_t *src1, word_t *src2,
     src1R();
     src2R();
     break;
+  case TYPE_CSR:
+    src1R();
+    if (*rd == 0)
+      break;
+    srcCSR();
+    break;
   case TYPE_N:
     break;
   default:
@@ -105,14 +119,15 @@ static void decode_operand(Decode *s, int *rd, word_t *src1, word_t *src2,
 }
 
 static int decode_exec(Decode *s) {
-  int rd = 0;
-  word_t src1 = 0, src2 = 0, imm = 0;
+  int rd = 0, _csr_addr = 0;
+  word_t src1 = 0, src2 = 0, imm = 0, _csr = 0;
   s->dnpc = s->snpc;
 
 #define INSTPAT_INST(s) ((s)->isa.inst.val)
 #define INSTPAT_MATCH(s, name, type, ... /* execute body */)                   \
   {                                                                            \
-    decode_operand(s, &rd, &src1, &src2, &imm, concat(TYPE_, type));           \
+    decode_operand(s, &rd, &src1, &src2, &_csr_addr, &_csr, &imm,              \
+                   concat(TYPE_, type));                                       \
     __VA_ARGS__;                                                               \
   }
 
@@ -209,19 +224,29 @@ static int decode_exec(Decode *s) {
 
   /*instructions for branch*/
   INSTPAT("??????? ????? ????? 000 ????? 11000 11", beq, B,
-          s->dnpc = src1 == src2 ? imm + cpu.pc : s->snpc);
+          s->dnpc = src1 == src2 ? imm + s->pc : s->snpc);
   INSTPAT("??????? ????? ????? 001 ????? 11000 11", bne, B,
-          s->dnpc = src1 != src2 ? imm + cpu.pc : s->snpc);
+          s->dnpc = src1 != src2 ? imm + s->pc : s->snpc);
   INSTPAT("??????? ????? ????? 100 ????? 11000 11", blt, B,
-          s->dnpc = (sword_t)src1 < (sword_t)src2 ? imm + cpu.pc : s->snpc);
+          s->dnpc = (sword_t)src1 < (sword_t)src2 ? imm + s->pc : s->snpc);
   INSTPAT("??????? ????? ????? 101 ????? 11000 11", bge, B,
-          s->dnpc = (sword_t)src1 >= (sword_t)src2 ? imm + cpu.pc : s->snpc);
+          s->dnpc = (sword_t)src1 >= (sword_t)src2 ? imm + s->pc : s->snpc);
   INSTPAT("??????? ????? ????? 110 ????? 11000 11", bltu, B,
-          s->dnpc = src1 < src2 ? imm + cpu.pc : s->snpc);
+          s->dnpc = src1 < src2 ? imm + s->pc : s->snpc);
   INSTPAT("??????? ????? ????? 111 ????? 11000 11", bgeu, B,
-          s->dnpc = src1 >= src2 ? imm + cpu.pc : s->snpc);
+          s->dnpc = src1 >= src2 ? imm + s->pc : s->snpc);
+
+  /*csr instructions*/
+  INSTPAT("??????? ????? ????? 001 ????? 11100 11", csrrw, CSR, R(rd) = _csr,
+          csr(_csr_addr) = src1);
+  INSTPAT("??????? ????? ????? 010 ????? 11100 11", csrrs, CSR, R(rd) = _csr,
+          csr(_csr_addr) = csr(_csr_addr) | src1);
 
   /*instructions for exception*/
+  INSTPAT("0011000 00010 00000 000 00000 11100 11", mret, N,
+          s->dnpc = csr(MEPC));
+  INSTPAT("0000000 00000 00000 000 00000 11100 11", ecall, N,
+          s->dnpc = isa_raise_intr(-1, s->pc)); // pc of current instruction
   INSTPAT("0000000 00001 00000 000 00000 11100 11", ebreak, N,
           NEMUTRAP(s->pc, R(10))); // R(10) is $a0
   INSTPAT("??????? ????? ????? ??? ????? ????? ??", inv, N, INV(s->pc));

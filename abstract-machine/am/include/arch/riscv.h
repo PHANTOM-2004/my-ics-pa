@@ -6,10 +6,13 @@
 #else
 #define NR_REGS 32
 #endif
-
+#include <stdint.h>
 struct Context {
-  // TODO: fix the order of these members to match trap.S
-  uintptr_t mepc, mcause, gpr[NR_REGS], mstatus;
+  // TODO: add void* pdir, union with gpr[0] or whole gpr[?]
+  uintptr_t gpr[NR_REGS];
+  uintptr_t mcause;
+  uintptr_t mstatus;
+  uintptr_t mepc;
   void *pdir;
 };
 
