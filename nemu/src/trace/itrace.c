@@ -23,6 +23,8 @@ void print_iringbuf() {
   int const buf_len =
       ringbuf_full ? CONFIG_ITRACE_RINGBUF_SIZE : ringbuf_pos + 1;
   for (int i = 0; i < buf_len; i++) {
+    if (!i && !ringbuf_full)
+      continue;
     printf("%s ", i == ringbuf_pos ? "  -->\t" : "\t");
     printf("%s\n", ringbuf[i]);
   }

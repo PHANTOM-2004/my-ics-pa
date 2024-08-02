@@ -218,6 +218,11 @@ config ETRACE
   depends on TRACE && TARGET_NATIVE_ELF &&ENGINE_INTERPRETER
   bool "Enable exception trace"
   default y
+  
+config ETRACE_RINGBUF_SIZE
+  depends on ETRACE
+  int "Valid when trace enabled; set the number of instruction in etrace buffer"
+  default 16
 
 config DIFFTEST
   depends on TARGET_NATIVE_ELF

@@ -32,6 +32,10 @@
 #include <trace/itrace.h>
 #endif
 
+#ifdef CONFIG_ETRACE
+#include <trace/etrace.h>
+#endif
+
 /* The assembly code of instructions executed is only output to the screen
  * when the number of instructions executed is less than this value.
  * This is useful when you use the `si' command.
@@ -59,10 +63,12 @@ static void trace_and_difftest(Decode *_this, vaddr_t dnpc) {
     IFDEF(CONFIG_ITRACE, puts(_this->logbuf));
   }
   IFDEF(CONFIG_DIFFTEST, difftest_step(_this->pc, dnpc));
-  
-  //iring buffer
+
+  // iring buffer
   IFDEF(CONFIG_ITRACE_RINGBUF_ON, iringbuf_trace(_this->logbuf));
-  
+
+  // ering buffer
+  IFDEF(CONFIG_ETRACE, eringbuf_trace(_this));
   // ftrace
   IFDEF(CONFIG_FTRACE, ftrace(_this));
 
@@ -136,6 +142,7 @@ static void statistic() {
 void assert_fail_msg() {
   IFDEF(CONFIG_ITRACE_RINGBUF_ON, print_iringbuf());
   IFDEF(CONFIG_FTRACE, print_ftrace());
+  IFDEF(CONFIG_ETRACE, print_eringbuf());
   isa_reg_display();
   statistic();
 }
@@ -179,5 +186,6 @@ void cpu_exec(uint64_t n) {
     statistic();
     IFDEF(CONFIG_ITRACE_RINGBUF_ON, print_iringbuf());
     IFDEF(CONFIG_FTRACE, print_ftrace());
+    IFDEF(CONFIG_ETRACE, print_eringbuf());
   }
 }
