@@ -38,6 +38,8 @@ f(30) f(31)
 #define OFFSET_EPC    ((NR_REGS + 2) * XLEN)
 
 .align 3
+.section .text
+.type __am_asm_trap, @function # let CC know that it's a function
 .globl __am_asm_trap
 __am_asm_trap:
   addi sp, sp, -CONTEXT_SIZE
@@ -69,3 +71,4 @@ __am_asm_trap:
 
   addi sp, sp, CONTEXT_SIZE
   mret
+  .size __am_asm_trap, .-__am_asm_trap # tell CC the size

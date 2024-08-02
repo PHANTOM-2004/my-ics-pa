@@ -212,4 +212,67 @@ void yield() {
           s->dnpc = isa_raise_intr(-1, s->pc)); // pc of current instruction
 ```
 这里也是有点意思, 我们设置`epc`, 返回中断向量. 不过这个时候, 我们的`NO`从哪里来呢? 
-## 
+## 写了一个非常隐蔽的`bug`
+在我添加`csr`支持之后, `difftest`无法通过了, 从第一条就开始无法通过. 然后便发现原因, 其实也很简单, 我们更改了`CPU_state`的结构. 但是`difftest`的时候使用的还是原来的`CPU_state`.因此拷贝内存的时候就拷贝错误了. 
+
+解决方案也非常简单, 特殊寄存器和`cpu`分开就可以了. 不过需要记得初始化`mstatus`. 
+
+## 前面的`NO`从哪里来? 
+
+这个地方也是找了好久, 实际上我们不考虑权限问题. 假定就在`machine`这个层面上考虑. 最终在手册里边找到`exeception code` 这部分, 应该设置为`11`也就是我刚刚没有通过的`diff test`中的`0xb`
+
+
+## `FTRACE`的`bug`
+![](assets/Pasted%20image%2020240802195248.png)
+我们观察一下, trap并没有被当作函数调用. 他是`no_type`的. 
+我们希望这也是个函数, 从而能够被我们的`ftrace`追踪, 
+```asm
+.align 3
+.section .text
+.type __am_asm_trap, @function # 这里制定类型为函数
+.globl __am_asm_trap
+__am_asm_trap:
+  addi sp, sp, -CONTEXT_SIZE
+
+  MAP(REGS, PUSH)
+
+  csrr t0, mcause
+  csrr t1, mstatus
+  csrr t2, mepc
+
+  STORE t0, OFFSET_CAUSE(sp)
+  STORE t1, OFFSET_STATUS(sp)
+  STORE t2, OFFSET_EPC(sp)
+
+  # set mstatus.MPRV to pass difftest
+  li a0, (1 << 17)
+  or t1, t1, a0
+  csrw mstatus, t1
+
+  mv a0, sp
+  jal __am_irq_handle
+
+  LOAD t1, OFFSET_STATUS(sp)
+  LOAD t2, OFFSET_EPC(sp)
+  csrw mstatus, t1
+  csrw mepc, t2
+
+  MAP(REGS, POP)
+
+  addi sp, sp, CONTEXT_SIZE
+  mret
+  # 这里.是当前地址, 减去函数的开始, 得到函数的大小
+  .size __am_asm_trap, .-__am_asm_trap 
+```
+
+![](assets/Pasted%20image%2020240802200530.png)
+![](assets/Pasted%20image%2020240802200516.png)
+
+`1508-13d0 = 138H = 312D`, 恰好就是这个函数的大小, 于是我们就可以追踪这个函数了. 
+![](assets/Pasted%20image%2020240802201156.png)
+## `ETRACE`
+
+- 打开etrace不改变程序的行为(对程序来说是非侵入式的): 你将来可能会遇到一些bug, 当你尝试插入一些`printf()`之后, bug的行为就会发生变化. 对于这样的bug, etrace还是可以帮助你进行诊断, 因为它是在NEMU中输出的, 不会改变程序的行为.
+- etrace也不受程序行为的影响: 如果程序包含一些致命的bug导致无法进入异常处理函数, 那就无法在CTE中调用`printf()`来输出; 在这种情况下, etrace仍然可以正常工作
+
+这其实是平凡的, 我们只要在`nemu`中做就可以了, 这样就完全不会影响原程序. 

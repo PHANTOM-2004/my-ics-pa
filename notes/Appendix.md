@@ -12,6 +12,9 @@
 - csr
 ![](assets/Pasted%20image%2020240802122222.png)
 
+- exception code
+![](assets/Pasted%20image%2020240802184715.png)
+
 
 - 指令dst, src list P107
 ![](./assets/Pasted%20image%2020240725174810.png)

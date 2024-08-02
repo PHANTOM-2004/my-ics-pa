@@ -15,6 +15,7 @@
 
 #include "local-include/reg.h"
 #include "common.h"
+#include "isa-def.h"
 #include <isa.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -30,6 +31,24 @@ static void print_byte(uint8_t const _byte) {
     printf("%u", !!(_byte & mask));
   }
 }
+
+static void print_word_detail(word_t const w) {
+  for (int t = 3; t >= 0; t--) {
+    uint8_t const cur = (uint8_t)BITS(w, t * 8 + 7, t * 8);
+    print_byte(cur);
+    printf(" ");
+  }
+}
+
+static void print_fmt_reg(int const i, word_t const cur_reg,
+                          char const *const reg_name) {
+  printf("R%02d\t %-5s\t HEX: " FMT_WORD, i, reg_name, cur_reg);
+  // TODO: we need to use bit rather than pointer
+  printf("\tBINARY: ");
+  print_word_detail(cur_reg);
+  printf("\n");
+}
+
 void isa_reg_display() {
   /* this is what gdb print
   (gdb) info registers
@@ -60,19 +79,13 @@ gs             0x0                 0
   */
   // 32 register total
   for (int i = 0; i < 32; i++) {
-    // we use word_t here
-    // 32/8 = 4
-    word_t const cur_reg = gpr(i);
-    printf("R%02d\t %-5s\t HEX: " FMT_WORD, i, reg_name(i), cur_reg);
-    // TODO: we need to use bit rather than pointer
-    printf("\tBINARY: ");
-    for (int t = 3; t >= 0; t--) {
-      uint8_t const cur = (uint8_t)BITS(cur_reg, t * 8 + 7, t * 8);
-      print_byte(cur);
-      printf(" ");
-    }
-    printf("\n");
- }
+    print_fmt_reg(i, gpr(i), reg_name(i));
+  }
+  // print special register
+  print_fmt_reg(0, csr(MCAUSE), "mcause");
+  print_fmt_reg(1, csr(MSTATUS), "mstatus");
+  print_fmt_reg(2, csr(MEPC), "mepc");
+  print_fmt_reg(3, csr(MTVEC), "MTVEC");
 }
 
 word_t isa_reg_str2val(const char *s, bool *success) {

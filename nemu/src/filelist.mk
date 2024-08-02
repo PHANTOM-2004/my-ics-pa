@@ -16,6 +16,7 @@
 SRCS-y += src/nemu-main.c
 DIRS-y += src/cpu src/monitor src/utils
 DIRS-$(CONFIG_MODE_SYSTEM) += src/memory
+DIRS-$(CONFIG_TRACE) += src/trace/
 DIRS-BLACKLIST-$(CONFIG_TARGET_AM) += src/monitor/sdb
 
 SHARE = $(if $(CONFIG_TARGET_SHARE),1,0)

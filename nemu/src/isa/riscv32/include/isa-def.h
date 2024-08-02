@@ -25,9 +25,12 @@ enum {
   MSTATUS = 0x300, 
 };
 
+typedef struct{
+  word_t csr[1 << 12];
+}MUXDEF(CONFIG_RV64, riscv64_CPU_spr, riscv32_CPU_spr);
+
 typedef struct {
   word_t gpr[MUXDEF(CONFIG_RVE, 16, 32)];
-  word_t csr[1 << 12];
   vaddr_t pc;
 } MUXDEF(CONFIG_RV64, riscv64_CPU_state, riscv32_CPU_state);
 

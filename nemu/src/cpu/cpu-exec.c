@@ -15,6 +15,7 @@
 
 #include "common.h"
 #include "difftest-def.h"
+#include "isa-def.h"
 #include "isa.h"
 #include "utils.h"
 #include <cpu/cpu.h>
@@ -23,6 +24,14 @@
 #include <locale.h>
 #include <stdint.h>
 
+#ifdef CONFIG_FTRACE
+#include <trace/ftrace.h>
+#endif
+
+#ifdef CONFIG_ITRACE_RINGBUF_ON
+#include <trace/itrace.h>
+#endif
+
 /* The assembly code of instructions executed is only output to the screen
  * when the number of instructions executed is less than this value.
  * This is useful when you use the `si' command.
@@ -30,142 +39,14 @@
  */
 #define MAX_INST_TO_PRINT 10
 
-CPU_state cpu = {.csr[MSTATUS] = 0x1800};
+CPU_state cpu = {};
+CPU_spr spr = {.csr[MSTATUS] = 0x1800};
 uint64_t g_nr_guest_inst = 0;
 static uint64_t g_timer = 0; // unit: us
 static bool g_print_step = false;
 
 void device_update();
 int scan_watchpoint();
-
-/* @param dnpc: we pass cpu.pc to dnpc
- * */
-#ifdef CONFIG_ITRACE_RINGBUF_ON
-#define CHAR_BUF_LEN 128
-
-static char ringbuf[CONFIG_ITRACE_RINGBUF_SIZE][CHAR_BUF_LEN]; // 128 same with
-static int ringbuf_pos = 0;
-static bool ringbuf_full = false;
-
-static void iringbuf_trace(char const *_logbuf) {
-  // Log("call iringbuf, config size : %d", CONFIG_ITRACE_RINGBUF_SIZE);
-  ringbuf_pos++;
-  if (ringbuf_pos == CONFIG_ITRACE_RINGBUF_SIZE)
-    ringbuf_pos = 0, ringbuf_full = true;
-
-  memcpy(ringbuf[ringbuf_pos], _logbuf, CHAR_BUF_LEN);
-  ringbuf[ringbuf_pos][CHAR_BUF_LEN - 1] = '\0'; // in case _logbuf[127] != 0
-}
-
-static void print_iringbuf() {
-  printf("[ITRACE]: recent instruction below[buffer %s full]\n",
-         ringbuf_full ? "" : ANSI_FMT("NOT", ANSI_FG_GREEN));
-  int const buf_len =
-      ringbuf_full ? CONFIG_ITRACE_RINGBUF_SIZE : ringbuf_pos + 1;
-  for (int i = 0; i < buf_len; i++) {
-    printf("%s ", i == ringbuf_pos ? "  -->\t" : "\t");
-    printf("%s\n", ringbuf[i]);
-  }
-}
-
-#undef CHAR_BUF_LEN
-#endif
-
-#ifdef CONFIG_FTRACE
-#include <trace/ftrace.h>
-
-static struct {
-  Elf32_func const *func;
-  vaddr_t pc;
-  enum { CALL, RET } status;
-} call_stack[CONFIG_FTRACE_STACK_SIZE * 2];
-static int stk_ptr = 0;
-
-static void printws(int len) {
-  while (len--)
-    printf(" ");
-}
-
-static void print_ftrace() {
-  printf("[FTRACE]: recent instruction below");
-  int space = 2;
-  for (int i = 0; i < stk_ptr; i++) {
-    if (call_stack[i].status == CALL) {
-      printf("%08x", call_stack[i].pc);
-      printws(space);
-      printf("call [%s@%08x]\n", call_stack[i].func->name,
-             call_stack[i].func->value);
-      space++;
-    } else {
-      printf("%08x", call_stack[i].pc);
-      printws(space);
-      printf("ret [%s]\n", call_stack[i].func->name);
-      space--;
-    }
-  }
-}
-
-static void ftrace(Decode const *const s, char const *disassemble) {
-
-  static int const ra = 0x1;
-  /*rd and auipc for last time */
-
-  uint32_t const i = s->isa.inst.val;
-  uint32_t const jalr_offset = BITS(i, 31, 20);
-  int const rs1 = BITS(i, 19, 15);
-  int const rd = BITS(i, 11, 7);
-
-  bool const is_jal = (uint32_t)BITS(i, 6, 0) == 0b1101111;
-  bool const is_jalr = (uint32_t)BITS(i, 6, 0) == 0b1100111 &&
-                       (uint32_t)BITS(i, 14, 12) == 0b000;
-
-  bool const is_near_cal = is_jal && rd == ra;
-  bool const is_far_call = is_jalr && rd == ra;
-  bool const is_call = is_near_cal || is_far_call;
-
-  // imm=0, rs1 = ra, rd = zero; pc = rs1 + imm = ra + 0
-  bool const is_ret = is_jalr && !jalr_offset && rs1 == ra && rd == 0x0;
-
-  Assert(stk_ptr >= 0 && stk_ptr < CONFIG_FTRACE_STACK_SIZE,
-         "stack only support at most %d", CONFIG_FTRACE_STACK_SIZE);
-
-  Elf32_func const *func = NULL;
-
-  /*if it is call*/
-  if (is_call) {
-    // add to call stack
-
-    func = get_elffunction(s->dnpc);
-    Assert(func, "get elffunction cannot be NULL");
-    // Log("%08x %s", s->pc, disassemble);
-    Log("call@[%08x@%s]", s->dnpc, func->name);
-
-    call_stack[stk_ptr].func = func;
-    call_stack[stk_ptr].pc = s->pc;
-    call_stack[stk_ptr].status = CALL;
-    stk_ptr++;
-    return;
-  }
-
-  /* if it is ret*/
-  else if (is_ret) {
-
-    func = get_elffunction(s->dnpc);
-    Assert(func, "get elffunction cannot be NULL");
-    // Log("%08x %s", s->pc, disassemble);
-    Log("ret@[%08x] %s", s->dnpc, func->name);
-
-    call_stack[stk_ptr].func = func;
-    call_stack[stk_ptr].pc = s->pc;
-    call_stack[stk_ptr].status = RET;
-    stk_ptr++;
-    return;
-  }
-
-  // up date last
-}
-
-#endif
 
 /*watch point new, watch point free*/
 static void trace_and_difftest(Decode *_this, vaddr_t dnpc) {
@@ -178,13 +59,15 @@ static void trace_and_difftest(Decode *_this, vaddr_t dnpc) {
     IFDEF(CONFIG_ITRACE, puts(_this->logbuf));
   }
   IFDEF(CONFIG_DIFFTEST, difftest_step(_this->pc, dnpc));
+  
+  //iring buffer
+  IFDEF(CONFIG_ITRACE_RINGBUF_ON, iringbuf_trace(_this->logbuf));
+  
+  // ftrace
+  IFDEF(CONFIG_FTRACE, ftrace(_this));
 
-#ifdef CONFIG_ITRACE_RINGBUF_ON
-  iringbuf_trace(_this->logbuf);
-  // print_iringbuf();
-#endif
-  /*scan all the watch point here*/
 #ifdef CONFIG_CONFIG_WATCHPOINT
+  /*scan all the watch point here*/
   int const ret = scan_watchpoint();
   if (ret < 0) // hits
     nemu_state.state = NEMU_STOP;
@@ -223,7 +106,6 @@ static void exec_once(Decode *s, vaddr_t pc) {
 #endif
 #endif
   // Log("[%08x] %s", s->pc, p);
-  IFDEF(CONFIG_FTRACE, ftrace(s, p));
 }
 
 static void execute(uint64_t n) {
