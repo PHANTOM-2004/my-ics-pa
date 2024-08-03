@@ -12,6 +12,7 @@
 /fceux-am
 /am-kernels
 
+!/tests/*
 !/notes/*
 !/notes/assets/*
 /notes/.obsidian/
