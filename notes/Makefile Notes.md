@@ -205,3 +205,14 @@ endif
 ```
 这个就是命令行接收到的目标, `.DEFAULT_GOAL`也是特殊变量. 顾名思义. 
 
+-- --
+## 项目的一些构建技巧
+
+```makefile
+SRCS-y += src/nemu-main.c
+DIRS-y += src/cpu src/monitor src/utils
+DIRS-$(CONFIG_MODE_SYSTEM) += src/memory
+DIRS-$(CONFIG_TRACE) += src/trace/
+DIRS-BLACKLIST-$(CONFIG_TARGET_AM) += src/monitor/sdb
+```
+实际上这里的`DIRS-$(...)`容易让人混淆, 其实这里在`menuconfig`部分已经有所定义, 如果存在的话就是`-y`也就加到源文件里边, 这些宏定义的话值就是`-y`. 
