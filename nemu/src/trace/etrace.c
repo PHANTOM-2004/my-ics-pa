@@ -25,8 +25,8 @@ enum {
 };
 
 void eringbuf_trace(Decode *s) {
-  Log("call eringbuf, config size : %d, instruction: " FMT_WORD,
-      CONFIG_ETRACE_RINGBUF_SIZE, s->isa.inst.val);
+  // Log("call eringbuf, config size : %d, instruction: " FMT_WORD,
+  // CONFIG_ETRACE_RINGBUF_SIZE, s->isa.inst.val);
   if (!(EBREAK == s->isa.inst.val || ECALL == s->isa.inst.val))
     return;
   eringbuf_pos++;
@@ -52,10 +52,11 @@ void print_eringbuf() {
       continue;
     printf("%s ", i == eringbuf_pos ? "  -->\t" : "\t");
     printf("%s\n", eringbuf[i].rb);
-    printf("%s: " FMT_WORD "\t", "mcause", eringbuf[i].mcause);
-    printf("%s: " FMT_WORD "\t", "mtvec", eringbuf[i].mtvec);
-    printf("%s: " FMT_WORD "\t", "mstatus", eringbuf[i].mstatus);
-    printf("%s: " FMT_WORD "\n", "mepc", eringbuf[i].mepc);
+    printf("%s ", i == eringbuf_pos ? "  -->\t" : "\t");
+    printf("[%s]: " FMT_WORD "\t", "mcause", eringbuf[i].mcause);
+    printf("[%s]: " FMT_WORD "\t", "mtvec", eringbuf[i].mtvec);
+    printf("[%s]: " FMT_WORD "\t", "mstatus", eringbuf[i].mstatus);
+    printf("[%s]: " FMT_WORD "\n", "mepc", eringbuf[i].mepc);
   }
 }
 

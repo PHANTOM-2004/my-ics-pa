@@ -2,6 +2,7 @@
 #include <klib-macros.h>
 #include <klib.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 
 #if !defined(__ISA_NATIVE__) || defined(__NATIVE_USE_KLIB__)
@@ -29,6 +30,7 @@ typedef struct {
   int val_int;
   unsigned val_uint;
   char val_char;
+  uintptr_t val_uptr;
 } printfParser;
 
 typedef void (*buffer_handler_t)(printfParser *const _this);
@@ -113,11 +115,11 @@ static inline bool is_conversion(char const ch) {
 
 static inline bool is_flag(char const ch) { return ch == '0'; }
 
-static inline int itohex(int const num) {
+static inline int itohex(int const num, bool const upper) {
   assert(num >= 0 && num < 16);
   if (num < 10)
     return num + '0';
-  return num - 10 + 'a';
+  return num - 10 + (upper ? 'A' : 'a');
 }
 
 // return the length
@@ -136,15 +138,16 @@ static void _itoa(printfParser *const _this) {
   _this->cur_out_str = buf_pos + 1;
 }
 
-static void _utoa(printfParser *const _this, unsigned const base) {
+static void _utoa(printfParser *const _this, uint64_t num, unsigned const base,
+                  bool const upper) {
   int length = 0;
   char *buf_pos = _this->str_buffer + STRING_BUFFER_SIZE - 1;
   do {
-    *buf_pos = (char)itohex(_this->val_uint % base);
-    _this->val_uint /= base;
+    *buf_pos = (char)itohex(num % base, upper);
+    num /= base;
     length++;
     buf_pos--;
-  } while (_this->val_uint);
+  } while (num);
 
   _this->cur_out_len = length;
   _this->cur_out_str = buf_pos + 1;
@@ -231,13 +234,17 @@ static int _printf_base(char *out, char const *fmt, size_t const n,
 
       case 'u':
         parser->val_uint = va_arg(ap, unsigned int);
-        _utoa(parser, 10);
+        _utoa(parser, parser->val_uint, 10, 0);
         break;
 
       case 'x':
       case 'X':
         parser->val_uint = va_arg(ap, unsigned int);
-        _utoa(parser, 16);
+        _utoa(parser, parser->val_uint, 16, *p == 'X');
+        break;
+      case 'p':
+        parser->val_uptr = va_arg(ap, uintptr_t);
+        _utoa(parser, parser->val_uptr, 16, 0);
         break;
 
       default: // not %
