@@ -110,7 +110,7 @@ static void str_write_to_stdout(printfParser *const _this) {
 static inline bool is_conversion(char const ch) {
   // these type are trivial integer
   return ch == 'd' || ch == 's' || ch == 'u' || ch == 'x' || ch == 'p' ||
-         ch == 'f';
+         ch == 'f' || ch == 'c';
 }
 
 static inline bool is_flag(char const ch) { return ch == '0'; }
@@ -181,6 +181,7 @@ static char const *parse_format(printfParser *const parser, char const *p) {
     }
 
     // now read witdh
+    printf("%s",p);
     assert(*p && isdigit(*p));
     parser->width = atoi(p);
 
@@ -243,8 +244,9 @@ static int _printf_base(char *out, char const *fmt, size_t const n,
         _utoa(parser, parser->val_uint, 16, *p == 'X');
         break;
       case 'p':
+      case 'P':
         parser->val_uptr = va_arg(ap, uintptr_t);
-        _utoa(parser, parser->val_uptr, 16, 0);
+        _utoa(parser, parser->val_uptr, 16, *p == 'P');
         break;
 
       default: // not %
