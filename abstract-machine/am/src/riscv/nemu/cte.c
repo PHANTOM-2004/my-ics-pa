@@ -17,11 +17,12 @@ Context *__am_irq_handle(Context *c) {
         ev.event = EVENT_YIELD;
         break;
       default: // unknown type
-        ev.event = EVENT_ERROR;
+        ev.event = EVENT_SYSCALL;
+        break;
       }
+      // mepc += 4;
       c->mepc += 4; // add 4 in software
-      break;
-    }
+    } break;
     // unknown case
     default:
       ev.event = EVENT_ERROR;

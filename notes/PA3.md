@@ -430,6 +430,8 @@ Context* __am_irq_handle(Context *c) {
 
 实际上, 系统调用是软件层面的事情. 软件层面只需要根据`a7`识别就可以, 我们读代码发现, 其实早就发现, 异常的信息放在了`a7`里面. 
 
+> 处理器通常只会提供一条自陷指令, 这时`EVENT_SYSCALL`和`EVENT_YIELD` 都通过相同的自陷指令来实现, 因此CTE需要额外的方式区分它们. 如果自陷指令本身可以携带参数, 就可以用不同的参数指示不同的事件, 例如x86和mips32都可以采用这种方式; 如果自陷指令本身不能携带参数, 那就需要通过其他状态来区分, 一种方式是通过某个寄存器的值来区分, riscv32采用这种方式.
+
 ```c
 Context *__am_irq_handle(Context *c) {
   if (user_handler) {
@@ -465,3 +467,138 @@ Context *__am_irq_handle(Context *c) {
 
 ![](assets/Pasted%20image%2020240804183805.png)
 
+## 实现系统调用
+
+先看一组宏
+```c
+// helper macros
+#define _concat(x, y) x ## y
+#define concat(x, y) _concat(x, y)
+#define _args(n, list) concat(_arg, n) list
+#define _arg0(a0, ...) a0
+#define _arg1(a0, a1, ...) a1
+#define _arg2(a0, a1, a2, ...) a2
+#define _arg3(a0, a1, a2, a3, ...) a3
+#define _arg4(a0, a1, a2, a3, a4, ...) a4
+#define _arg5(a0, a1, a2, a3, a4, a5, ...) a5
+
+// extract an argument from the macro array
+#define SYSCALL  _args(0, ARGS_ARRAY)
+#define GPR1 _args(1, ARGS_ARRAY)
+#define GPR2 _args(2, ARGS_ARRAY)
+#define GPR3 _args(3, ARGS_ARRAY)
+#define GPR4 _args(4, ARGS_ARRAY)
+#define GPRx _args(5, ARGS_ARRAY)
+```
+其实这里总结来, `GPRi`就是一组里面第`i`个寄存器. 
+
+```c
+# define ARGS_ARRAY ("ecall", "a7", "a0", "a1", "a2", "a0")
+```
+
+```c
+intptr_t _syscall_(intptr_t type, intptr_t a0, intptr_t a1, intptr_t a2) {
+  register intptr_t _gpr1 asm (GPR1) = type;
+  register intptr_t _gpr2 asm (GPR2) = a0;
+  register intptr_t _gpr3 asm (GPR3) = a1;
+  register intptr_t _gpr4 asm (GPR4) = a2;
+  register intptr_t ret asm (GPRx);
+  asm volatile (SYSCALL : "=r" (ret) : "r"(_gpr1), "r"(_gpr2), "r"(_gpr3), "r"(_gpr4));
+  return ret;
+}
+```
+
+这里的赋值就是向特定的寄存器赋值
+```
+a7 <= type
+a0 <= a0
+a1 <= a1
+a2 <= a2
+return value <= a0
+```
+这里的`SYSCALL`展开后就是`ecall`. 
+
+
+### 实现`SYS_yield`
+
+这里的`libos`中的`makefile`留了个小坑
+```makefile
+# HAS_NAVY = 1
+```
+这里被注释掉了, 这就导致无法建立符号链接, 缺少头文件和镜像. 所以需要取消注释.
+
+> 添加一个系统调用比你想象中要简单, 所有信息都已经准备好了. 我们只需要在分发的过程中添加相应的系统调用号, 并编写相应的系统调用处理函数`sys_xxx()`, 然后调用它即可. 回过头来看`dummy`程序, 它触发了一个`SYS_yield`系统调用. 我们约定, 这个系统调用直接调用CTE的`yield()`即可, 然后返回`0`.
+
+
+首先是`am`部分
+```c
+Context *__am_irq_handle(Context *c) {
+  if (user_handler) {
+    Event ev = {0};
+
+    switch (c->mcause) {
+    // machine mode(highest)
+    case 0xb: {
+      // judege the system call
+      switch (c->GPR1) {
+      case (uint32_t)-1:
+        ev.event = EVENT_YIELD;
+        break;
+      default: // unknown type
+        ev.event = EVENT_SYSCALL;
+        break;
+      }
+      // mepc += 4;
+      c->mepc += 4; // add 4 in software
+    } break;
+    // unknown case
+    default:
+      ev.event = EVENT_ERROR;
+      break;
+    }
+
+    c = user_handler(ev, c);
+    assert(c != NULL);
+  }
+  return c;
+}
+```
+
+接下来是`os`部分进行分发, 并对于`syscall`调用对应`do_syscall`
+```c
+static Context *do_event(Event e, Context *c) {
+  switch (e.event) {
+  case EVENT_YIELD:
+    printf("Handle EVENT_YIELD\n");
+    break;
+  case EVENT_SYSCALL:
+    printf("Handle EVENT_SYSCALL\n");
+    do_syscall(c);
+    break;
+  default:
+    panic("Unhandled event ID = %d", e.event);
+  }
+
+  return c;
+}
+```
+
+最后添加具体`syscall`内容实现
+```c
+void do_syscall(Context *c) {
+  uintptr_t a[4];
+  a[0] = c->GPR1;
+  a[1] = c->GPR2; //it is  a0
+
+  switch (a[0]) {
+  case SYS_yield:
+    sys_yield();
+    break;
+  case SYS_exit:
+    sys_exit(a[1]);
+    break;
+  default:
+    panic("Unhandled syscall ID = %d", a[0]);
+  }
+}
+```
