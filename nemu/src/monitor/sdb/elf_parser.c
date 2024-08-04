@@ -149,9 +149,19 @@ static void read_section_header_table(Elf32_parser *const _this) {
 
 static void locate_symbol_and_string_table(Elf32_parser *const _this) {
   bool find_symbol_table = false, find_string_table = false;
+  // it means that _this->section_header_num is stored in section header table
+  bool const seek_sh_num = !_this->section_header_num;
+  if (seek_sh_num)
+    _this->section_header_num = 1;
   for (uint32_t i = 0; i < _this->section_header_num; i++) {
     Log("section header[%2d] Addr: %08x", i,
         _this->elf_section_header_table[i].sh_addr);
+
+    if (seek_sh_num && !i) {
+      _this->section_header_num = _this->elf_section_header_table[0].sh_size;
+      continue;
+    }
+
     switch (_this->elf_section_header_table[i].sh_type) {
 
     case SHT_SYMTAB:
@@ -163,8 +173,8 @@ static void locate_symbol_and_string_table(Elf32_parser *const _this) {
       /*  sh_size
         This  member  holds  the section's size in bytes.
         Unless the section type is SHT_NOBITS, the section occupies sh_size
-        bytes in the file. A section of type SHT_NOBITS may have a nonzero size,
-        but it occupies no space in the file.
+        bytes in the file. A section of type SHT_NOBITS may have a nonzero
+        size, but it occupies no space in the file.
        */
       find_symbol_table = true;
       _this->is_elf32 =
