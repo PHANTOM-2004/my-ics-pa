@@ -13,6 +13,9 @@ extern "C" {
 
 // ctype.h
 inline int isdigit(int c) { return c >= '0' && c <= '9'; }
+inline int isalpha(int c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
 
 // string.h
 void *memset(void *s, int c, size_t n);

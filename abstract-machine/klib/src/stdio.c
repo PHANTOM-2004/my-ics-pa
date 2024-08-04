@@ -126,13 +126,23 @@ static inline int itohex(int const num, bool const upper) {
 static void _itoa(printfParser *const _this) {
   int length = 0;
   char *buf_pos = _this->str_buffer + STRING_BUFFER_SIZE - 1;
+  bool const negative = _this->val_int < 0;
+  if (negative)
+    _this->val_int = -_this->val_int;
 
   do {
     *buf_pos = _this->val_int % 10 + '0';
+    assert(isdigit(*buf_pos));
     _this->val_int /= 10;
     length++;
     buf_pos--;
   } while (_this->val_int);
+
+  if (negative) {
+    *buf_pos = '-';
+    buf_pos--;
+    length++;
+  }
 
   _this->cur_out_len = length;
   _this->cur_out_str = buf_pos + 1;
@@ -181,7 +191,7 @@ static char const *parse_format(printfParser *const parser, char const *p) {
     }
 
     // now read witdh
-    printf("%s",p);
+    printf("%s", p);
     assert(*p && isdigit(*p));
     parser->width = atoi(p);
 
