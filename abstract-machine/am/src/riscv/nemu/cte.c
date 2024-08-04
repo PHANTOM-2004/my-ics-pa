@@ -1,27 +1,42 @@
 #include <am.h>
-#include <riscv/riscv.h>
 #include <klib.h>
+#include <stdint.h>
 
-static Context* (*user_handler)(Event, Context*) = NULL;
+static Context *(*user_handler)(Event, Context *) = NULL;
 
-Context* __am_irq_handle(Context *c) {
+Context *__am_irq_handle(Context *c) {
   if (user_handler) {
     Event ev = {0};
+
     switch (c->mcause) {
-      case 0xb: ev.event = EVENT_YIELD; break;
-      default: ev.event = EVENT_ERROR; break;
+    // machine mode(highest)
+    case 0xb: {
+      // judege the system call
+      switch (c->GPR1) {
+      case (uint32_t)-1:
+        ev.event = EVENT_YIELD;
+        break;
+      default: // unknown type
+        ev.event = EVENT_ERROR;
+      }
+      c->mepc += 4; // add 4 in software
+      break;
+    }
+    // unknown case
+    default:
+      ev.event = EVENT_ERROR;
+      break;
     }
 
     c = user_handler(ev, c);
     assert(c != NULL);
   }
-  c->mepc += 4;//add 4 in software
   return c;
 }
 
 extern void __am_asm_trap(void);
 
-bool cte_init(Context*(*handler)(Event, Context*)) {
+bool cte_init(Context *(*handler)(Event, Context *)) {
   // initialize exception entry
   asm volatile("csrw mtvec, %0" : : "r"(__am_asm_trap));
 
@@ -43,9 +58,6 @@ void yield() {
 #endif
 }
 
-bool ienabled() {
-  return false;
-}
+bool ienabled() { return false; }
 
-void iset(bool enable) {
-}
+void iset(bool enable) {}

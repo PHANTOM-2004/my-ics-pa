@@ -276,3 +276,192 @@ __am_asm_trap:
 - etrace也不受程序行为的影响: 如果程序包含一些致命的bug导致无法进入异常处理函数, 那就无法在CTE中调用`printf()`来输出; 在这种情况下, etrace仍然可以正常工作
 
 这其实是平凡的, 我们只要在`nemu`中做就可以了, 这样就完全不会影响原程序. 
+
+-- -- 
+## `Nanos`
+### `Newlib`
+
+说实话这个地方编译`Newlib`的时候抱错了,  出现了很多隐式函数声明的错误. 我只能手动把这些`-Werror`关闭了. 
+```makefile
+CFLAGS+=-Wno-error=implicit-function-declaration
+```
+
+### 堆和栈 
+这两个应当是在程序运行的时候动态分配的, 被放到内存的哪部分是由操作系统决定的. 程序只能决定栈的布局. 
+
+### 识别不同格式
+`ELF`格式有一个`magic number`就知道有没有`elf header`了. 
+
+### `FileSize`与`MemSize`
+
+```
+Program Headers:  
+ Type           Offset   VirtAddr   PhysAddr   FileSiz MemSiz  Flg Align  
+ PHDR           0x000034 0x00000034 0x00000034 0x00180 0x00180 R   0x4  
+ INTERP         0x0001b4 0x000001b4 0x000001b4 0x00013 0x00013 R   0x1  
+     [Requesting program interpreter: /lib/ld-linux.so.2]  
+ LOAD           0x000000 0x00000000 0x00000000 0x003f0 0x003f0 R   0x1000  
+ LOAD           0x001000 0x00001000 0x00001000 0x001e0 0x001e0 R E 0x1000  
+ LOAD           0x002000 0x00002000 0x00002000 0x000fc 0x000fc R   0x1000  
+ LOAD           0x002ee8 0x00003ee8 0x00003ee8 0x00124 0x00128 RW  0x1000  
+ DYNAMIC        0x002ef0 0x00003ef0 0x00003ef0 0x000f0 0x000f0 RW  0x4  
+ NOTE           0x0001c8 0x000001c8 0x000001c8 0x00078 0x00078 R   0x4  
+ GNU_PROPERTY   0x0001ec 0x000001ec 0x000001ec 0x00034 0x00034 R   0x4  
+ GNU_EH_FRAME   0x002008 0x00002008 0x00002008 0x00034 0x00034 R   0x4  
+ GNU_STACK      0x000000 0x00000000 0x00000000 0x00000 0x00000 RW  0x10  
+ GNU_RELRO      0x002ee8 0x00003ee8 0x00003ee8 0x00118 0x00118 R   0x1
+```
+
+- 填充和内存堆砌
+- 未初始化的变量`.bss`, 这部分在`filesize`应该是不占空间的. 
+
+### `LOAD`
+
+```
+  +-------+---------------+-----------------------+
+   |       |...............|                       |
+   |       |...............|                       |  ELF file
+   |       |...............|                       |
+   +-------+---------------+-----------------------+
+   0       ^               |              
+           |<------+------>|       
+           |       |       |             
+           |       |                            
+           |       +----------------------------+       
+           |                                    |       
+Type       |   Offset    VirtAddr    PhysAddr   |FileSiz  MemSiz   Flg  Align
+LOAD       +-- 0x001000  0x03000000  0x03000000 +0x1d600  0x27240  RWE  0x1000
+                            |                       |       |     
+                            |   +-------------------+       |     
+                            |   |                           |     
+                            |   |     |           |         |       
+                            |   |     |           |         |      
+                            |   |     +-----------+ ---     |     
+                            |   |     |00000000000|  ^      |   
+                            |   | --- |00000000000|  |      |    
+                            |   |  ^  |...........|  |      |  
+                            |   |  |  |...........|  +------+
+                            |   +--+  |...........|  |      
+                            |      |  |...........|  |     
+                            |      v  |...........|  v    
+                            +-------> +-----------+ ---  
+                                      |           |     
+                                      |           |    
+                                         Memory
+```
+
+注意剩余的那部分填充为`0`. [为什么填充为0](https://stackoverflow.com/questions/13437732/elf-program-headers-memsiz-vs-filesiz)
+
+830003fc
+### `.bss`与`.data`
+
+```c
+char a[0x77770];  
+char b[0x66660] = "fuck you bitch";  
+  
+int main(){  
+ return 0;  
+}
+```
+
+![](assets/Pasted%20image%2020240804120716.png)
+
+实际上这里应该是进行了内存对齐操作. 但是从数量就可以看出来, `.data`和`.bss`对应的就是初始化的部分和没有初始化的部分. `.bss`就是多出来的那部分内容. 
+
+> 你需要找出每一个需要加载的segment的`Offset`, `VirtAddr`, `FileSiz`和`MemSiz`这些参数. 其中相对文件偏移`Offset`指出相应segment的内容从ELF文件的第`Offset`字节开始, 在文件中的大小为`FileSiz`, 它需要被分配到以`VirtAddr`为首地址的虚拟内存位置, 在内存中它占用大小为`MemSiz`. 也就是说, 这个segment使用的内存就是`[VirtAddr, VirtAddr + MemSiz)`这一连续区间, 然后将segment的内容从ELF文件中读入到这一内存区间, 并将`[VirtAddr + FileSiz, VirtAddr + MemSiz)`对应的物理区间清零.
+
+### 再次`ELF Parser`
+
+这次我们需要解析的是`program header`
+
+这个就很好解析, 注意到`ELF`头的两条信息
+```
+ Size of program headers:           32 (bytes)  
+ Number of program headers:         12
+```
+
+参照手册
+```
+e_phentsize: This member holds the size in bytes of one entry in the file's program header table; all entries are the same size.  
+
+e_phnum: This member holds the number of entries in the program header table.  Thus the product of e_phentsize and e_phnum gives the table's size in bytes.  If a file has no program header, e_phnum holds the value zero.  
+  
+If  the  number of entries in the program header table is larger than or equal to PN_XNUM (0xffff), this member holds PN_XNUM (0xffff) and  the real number of entries in the program header table is held in the sh_info member of the initial entry in section header table.  Otherwise, the sh_info member of the initial entry contains the value zero.  
+```
+
+`Program Header`需要的结构体.
+```c
+          typedef struct {  
+              uint32_t   p_type;  
+              Elf32_Off  p_offset;  
+              Elf32_Addr p_vaddr;  
+              Elf32_Addr p_paddr;  
+              uint32_t   p_filesz;  
+              uint32_t   p_memsz;  
+              uint32_t   p_flags;  
+              uint32_t   p_align;  
+          } Elf32_Phdr;
+```
+
+### 处理异常类型的时候发现前面的`bug`
+
+```c
+Context* __am_irq_handle(Context *c) {
+  if (user_handler) {
+    Event ev = {0};
+    switch (c->mcause) {
+      case 0xb: ev.event = EVENT_YIELD; break;
+      default: ev.event = EVENT_ERROR; break;
+    }
+
+    c = user_handler(ev, c);
+    assert(c != NULL);
+  }
+  c->mepc += 4;//add 4 in software
+  return c;
+}
+```
+`riscv32`需要在适当的地方增加`epc`, 这是软件层面完成的. 这里如果不加, 那么会一直循环在同一个异常. 
+
+
+### 一语惊醒梦中人
+
+在设置异常号的时候, 根据当前情况, 我们的`m->status`只能是`11`, 因为我们不考虑权限这个问题. 但是这样的问题就是我们怎么识别系统调用? 这里困扰了我很久. 
+
+实际上, 系统调用是软件层面的事情. 软件层面只需要根据`a7`识别就可以, 我们读代码发现, 其实早就发现, 异常的信息放在了`a7`里面. 
+
+```c
+Context *__am_irq_handle(Context *c) {
+  if (user_handler) {
+    Event ev = {0};
+
+    switch (c->mcause) {
+    // machine mode(highest)
+    case 0xb: {
+      // judege the system call
+      // 这里面再套一层`case`, 根据a7识别
+      switch (c->GPR1) {
+      case (uint32_t)-1:
+        ev.event = EVENT_YIELD;
+        break;
+      default: // unknown type
+        ev.event = EVENT_ERROR;
+      }
+      c->mepc += 4; // add 4 in software
+      break;
+    }
+    // unknown case
+    default:
+      ev.event = EVENT_ERROR;
+      break;
+    }
+
+    c = user_handler(ev, c);
+    assert(c != NULL);
+  }
+  return c;
+}
+```
+
+![](assets/Pasted%20image%2020240804183805.png)
+

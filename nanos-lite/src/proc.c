@@ -2,6 +2,8 @@
 
 #define MAX_NR_PROC 4
 
+extern void naive_uload(PCB*pcb, const char* filename);
+
 static PCB pcb[MAX_NR_PROC] __attribute__((used)) = {};
 static PCB pcb_boot = {};
 PCB *current = NULL;
@@ -21,11 +23,10 @@ void hello_fun(void *arg) {
 
 void init_proc() {
   switch_boot_pcb();
-
   Log("Initializing processes...");
 
   // load program here
-
+  naive_uload(pcb, NULL);
 }
 
 Context* schedule(Context *prev) {
