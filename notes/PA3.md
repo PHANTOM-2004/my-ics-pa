@@ -602,3 +602,36 @@ void do_syscall(Context *c) {
   }
 }
 ```
+
+
+## `STRACE`
+
+在`Nanos-lite`中实现并不困难, 我们只需要在`handler`的部分加上跟踪即可. 
+
+> 在GNU/Linux中, 输出是通过`SYS_write`系统调用来实现的. 根据`write`的函数声明(参考`man 2 write`), 你需要在`do_syscall()`中识别出系统调用号是`SYS_write`之后, 检查`fd`的值, 如果`fd`是`1`或`2`(分别代表`stdout`和`stderr`), 则将`buf`为首地址的`len`字节输出到串口(使用`putch()`即可). 最后还要设置正确的返回值, 否则系统调用的调用者会认为`write`没有成功执行, 从而进行重试. 至于`write`系统调用的返回值是什么, 请查阅`man 2 write`. 另外不要忘记在`navy-apps/libs/libos/src/syscall.c`的`_write()`中调用系统调用接口函数.
+
+
+## `write`
+
+```c
+int _write(int fd, void *buf, size_t count) {
+ return _syscall_(SYS_write, fd, (intptr_t)buf, count);// 首先进行系统调用
+}
+```
+`_syscall_`的返回值是`GPRx`, 这就是我们在对应系统调用中实现的返回值. 
+
+```c
+  switch (a[0]) {
+  case SYS_yield:
+    sys_yield();
+    break;
+  case SYS_exit:
+    sys_exit(a[1]);
+    break;
+  case SYS_write:
+    c->GPRx = sys_write(a[1], (void const *)a[2], a[3]); //设置返回值
+    break;
+  default:
+    panic("Unhandled syscall ID = %d", a[0]);
+  }
+```

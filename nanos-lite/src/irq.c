@@ -9,13 +9,13 @@ static Context *do_event(Event e, Context *c) {
     printf("Handle EVENT_YIELD\n");
     break;
   case EVENT_SYSCALL:
-    printf("Handle EVENT_SYSCALL\n");
+    // printf("Handle EVENT_SYSCALL\n");
     do_syscall(c);
     break;
   default:
     panic("Unhandled event ID = %d", e.event);
   }
-
+  //printf("ret[a0]:%d\n", c->GPRx);
   return c;
 }
 
