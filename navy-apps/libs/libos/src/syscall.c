@@ -71,7 +71,23 @@ int _write(int fd, void *buf, size_t count) {
 }
 
 void *_sbrk(intptr_t increment) {
-  return (void *)-1;
+  /* On success, sbrk() returns the previous program break.  
+   * (If the break was increased, then this value is a pointer
+   * to the start of the newly allocated memory). 
+   * On error, (void *) -1 is returned, and errno is set to ENOMEM.
+  */
+  extern char end;
+  static intptr_t program_end = (intptr_t)&end;
+
+  int const syscall_ret = _syscall_(SYS_brk, increment, 0, 0);
+  intptr_t res = -1;
+  if(syscall_ret == 0){
+    // the syscall is success
+    // then we need to adjust the heap
+    res = program_end; 
+    program_end = (intptr_t)program_end + increment;
+  }
+  return (void *)res;
 }
 
 int _read(int fd, void *buf, size_t count) {

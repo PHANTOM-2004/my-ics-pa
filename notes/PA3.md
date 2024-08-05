@@ -635,3 +635,92 @@ int _write(int fd, void *buf, size_t count) {
     panic("Unhandled syscall ID = %d", a[0]);
   }
 ```
+
+## 堆的管理
+
+> 1. program break一开始的位置位于`_end`
+> 2. 被调用时, 根据记录的program break位置和参数`increment`, 计算出新program break
+> 3. 通过`SYS_brk`系统调用来让操作系统设置新program break
+ >4. 若`SYS_brk`系统调用成功, 该系统调用会返回`0`, 此时更新之前记录的program break的位置, 并将旧program break的位置作为`_sbrk()`的返回值返回
+> 5. 若该系统调用失败, `_sbrk()`会返回`-1`
+
+这里记得查询如何使用`end`.
+
+> The program must explicitly declare these symbols; they are not defined in any header file.
+
+```c
+      #include <stdio.h>  
+      #include <stdlib.h>  
+  
+      extern char etext, edata, end; /* The symbols must have some type,  
+                                         or "gcc -Wall" complains */  
+  
+      int  
+      main(void)  
+      {  
+          printf("First address past:\n");  
+          printf("    program text (etext)      %10p\n", &etext);  
+          printf("    initialized data (edata)  %10p\n", &edata);  
+          printf("    uninitialized data (end)  %10p\n", &end);  
+  
+          exit(0);
+       }
+```
+
+可以看到成功调用, 并且不是单个字符输出
+![](assets/Pasted%20image%2020240805145601.png)
+
+-- -- 
+
+## 必答题
+
+> 我们知道`navy-apps/tests/hello/hello.c`只是一个C源文件, 它会被编译链接成一个ELF文件. 那么, hello程序一开始在哪里? 它是怎么出现内存中的? 为什么会出现在目前的内存位置? 它的第一条指令在哪里? 究竟是怎么执行到它的第一条指令的? hello程序在不断地打印字符串, 每一个字符又是经历了什么才会最终出现在终端上?
+
+首先这个源文件会被编译, 然后按照一定的方式与提供的库`libos`, `libc`链接成为一个`ELF`. 
+
+如何读入数据? 原本数据还在`elf`文件中, 但是通过`resourse.S`
+```asm
+.section .data
+.global ramdisk_start, ramdisk_end
+ramdisk_start:
+.incbin "build/ramdisk.img"
+ramdisk_end:
+
+.section .rodata
+.globl logo
+logo:
+.incbin "resources/logo.txt"
+.byte 0
+```
+这里而把`ramdisk.img`读入到内存中. 
+
+第一条指令在哪里? 在我们`init_proc`的过程中调用了`naive_load`, 其中就是我们实现的`loader`, 解析`elf`文件, 加载`Program Header`中`LOAD`类型的段. 找到`entry poinrt`, 然后通过
+```c
+void naive_uload(PCB *pcb, const char *filename) {
+  uintptr_t entry = loader(pcb, filename);
+  Log("Jump to entry = 0x%p", entry);
+  ((void (*)())entry)();
+}
+```
+这里而这个看似很奇怪的东西其实很显然(只要SJ课学的好的话). 把一个`entry`转换为一个函数指针, 然后调用这个函数指针. 也就实现了向这个地方的跳转. 就到了第一条指令.
+
+字符经过了什么到终端上面? 这里便会调用提供的`libc`, 其中有`stdio.h`的各种函数, 比如这里对于`printf`, 其中再往下划分, 会调用一个`write`函数. `write`函数会调用`libos`中的`_write`, `_write`调用`syscall`, 然后产生异常, 由操作系统处理`syscall`. 由下面的我们实现的处理进行输出. 
+```c
+static int sys_write(int fd, void const *buf, size_t count) {
+  // sys write need to ret correct value;
+  // On success, the number of bytes written is returned.
+  // On error, -1 is returned, and errno is set to indicate the error.
+  int ret = 0;
+  assert(fd == 1 || fd == 2);
+  for (size_t i = 0; i < count; i++) {
+    putch(((char const *)buf)[i]);
+    ret++;
+  }
+  return ret;
+}
+```
+
+再往下一层抽象就是`putch`, 这是`am`中的接口. `am`中负责嗲用`outb`, 这个是一个内联汇编, 用于和`nemu`的`IO`设备进行交互. 最后一个字符就这样打印出来了. 
+
+-- -- 
+## `TODO`:  `FTRACE`支持多个文件

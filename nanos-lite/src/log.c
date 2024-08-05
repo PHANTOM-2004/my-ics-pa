@@ -1,8 +1,8 @@
-#include "log.h"
+#include "common.h"
 #include <stdint.h>
 
 #ifdef CONFIG_STRACE
-
+#include "log.h"
 #include "syscall.h"
 
 #define CONFIG_STRACE_SIZE 8192
@@ -31,8 +31,11 @@ static void print_single_syscall(int const i) {
   case SYS_write:
     printf("sys_write[fd=%d buf=%x count=%u\n", p.a0, p.a1, p.a2);
     break;
+  case SYS_brk:
+    printf("sys_brk[increment=%d]\n", p.a0);
+    break;
   default:
-    panic("Unknown syscall ID = %d", strace_events[i].event_type);
+    panic("Unknown syscall ID = %d", p.event_type);
   }
 }
 

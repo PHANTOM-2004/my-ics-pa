@@ -25,6 +25,8 @@ static int sys_write(int fd, void const *buf, size_t count) {
   return ret;
 }
 
+static int sys_brk(intptr_t const increment) { return 0; }
+
 void do_syscall(Context *c) {
   uintptr_t a[4] = {c->GPR1, c->GPR2, c->GPR3, c->GPR4};
 #ifdef CONFIG_STRACE
@@ -39,6 +41,9 @@ void do_syscall(Context *c) {
     break;
   case SYS_write:
     c->GPRx = sys_write(a[1], (void const *)a[2], a[3]);
+    break;
+  case SYS_brk:
+    c->GPRx = sys_brk(a[1]);
     break;
   default:
     panic("Unhandled syscall ID = %d", a[0]);
