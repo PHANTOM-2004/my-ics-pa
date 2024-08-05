@@ -9,28 +9,50 @@ static struct {
   enum { CALL, RET } status;
 } call_stack[CONFIG_FTRACE_STACK_SIZE * 2];
 static int stk_ptr = 0;
+static bool stk_full = false;
 
 static void printws(int len) {
   while (len--)
     printf(" ");
 }
 
+static int print_func_call_and_ret(int const i, int space) {
+  if (call_stack[i].status == CALL) {
+    printf(FMT_PADDR, call_stack[i].pc);
+    printws(space);
+    printf("call [%s@" FMT_PADDR "]\n", call_stack[i].func->name,
+           call_stack[i].func->value);
+    space++;
+  } else {
+    printf(FMT_PADDR, call_stack[i].pc);
+    printws(space);
+    printf("ret [%s]\n", call_stack[i].func->name);
+    space--;
+    if (space < 0)
+      space = 0;
+  }
+
+  return space;
+}
+
 void print_ftrace() {
-  printf("[FTRACE]: recent instruction below\n");
-  int space = 2;
-  for (int i = 0; i < stk_ptr; i++) {
-    if (call_stack[i].status == CALL) {
-      printf(FMT_PADDR, call_stack[i].pc);
-      printws(space);
-      printf("call [%s@" FMT_PADDR "]\n", call_stack[i].func->name,
-             call_stack[i].func->value);
-      space++;
-    } else {
-      printf(FMT_PADDR, call_stack[i].pc);
-      printws(space);
-      printf("ret [%s]\n", call_stack[i].func->name);
-      space--;
+
+  Log("stk_full: %c stk_ptr: %d", stk_full ? 'y' : 'n', stk_ptr);
+  printf("[FTRACE]: recent function call below\n");
+  if (!stk_full && !stk_ptr) {
+    printf("no function call\n");
+    return;
+  }
+
+  int space = 3;
+  if (stk_full) {
+    for (int i = stk_ptr; i < CONFIG_FTRACE_STACK_SIZE; i++) {
+      space = print_func_call_and_ret(i, space);
     }
+  }
+
+  for (int i = 0; i < stk_ptr; i++) {
+    space = print_func_call_and_ret(i, space);
   }
 }
 
@@ -73,7 +95,6 @@ void ftrace(Decode const *const s) {
     call_stack[stk_ptr].pc = s->pc;
     call_stack[stk_ptr].status = CALL;
     stk_ptr++;
-    return;
   }
 
   /* if it is ret*/
@@ -82,16 +103,16 @@ void ftrace(Decode const *const s) {
     func = get_elffunction(s->dnpc);
     Assert(func, "get elffunction cannot be NULL");
     // Log("%08x %s", s->pc, disassemble);
-    //Log("ret@[%08x] %s", s->dnpc, func->name);
+    // Log("ret@[%08x] %s", s->dnpc, func->name);
 
     call_stack[stk_ptr].func = func;
     call_stack[stk_ptr].pc = s->pc;
     call_stack[stk_ptr].status = RET;
     stk_ptr++;
-    return;
   }
 
-  // up date last
+  if (stk_ptr == CONFIG_FTRACE_STACK_SIZE)
+    stk_full = true, stk_ptr = 0; // let it come to ring buf
 }
 
 #endif

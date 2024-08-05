@@ -1,7 +1,9 @@
+#include "fs.h"
 #include <common.h>
 #include <elf.h>
 #include <proc.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #ifdef __LP64__
 #define Elf_Ehdr Elf64_Ehdr
@@ -38,10 +40,13 @@ typedef struct {
   size_t program_header_num;
   uintptr_t program_header_offset;
   uintptr_t entry_point;
+  int const fd;
 } Elf_parser;
 
 static void read_elf_header(Elf_parser *const _this) {
-  ramdisk_read(&_this->elf_header, 0, sizeof(Elf_Ehdr));
+  fs_lseek(_this->fd, 0, SEEK_SET);
+  fs_read(_this->fd, &_this->elf_header, sizeof(Elf_Ehdr));
+  //ramdisk_read(&_this->elf_header, 0, sizeof(Elf_Ehdr));
 
   _this->is_elf =
       *(uint32_t *)_this->elf_header.e_ident == 0x464c457f; // magic number
@@ -59,7 +64,7 @@ static void read_elf_header(Elf_parser *const _this) {
       _this->elf_header.e_phentsize);
 
   assert(_this->elf_header.e_phentsize == sizeof(Elf_Phdr));
-  
+
   _this->entry_point = _this->elf_header.e_entry;
   Log("Entry: 0x%x", _this->entry_point);
   assert(_this->entry_point);
@@ -69,17 +74,20 @@ static void read_program_header(Elf_parser *const _this) {
   _this->program_header =
       (Elf_Phdr *)malloc(_this->program_header_num * sizeof(Elf_Phdr));
 
-
-  ramdisk_read(_this->program_header, _this->program_header_offset,
-               sizeof(Elf_Phdr) * _this->program_header_num);
+  fs_lseek(_this->fd, _this->program_header_offset, SEEK_SET);
+  fs_read(_this->fd, _this->program_header,
+          sizeof(Elf_Phdr) * _this->program_header_num);
+  // ramdisk_read(_this->program_header, _this->program_header_offset,
+  //             sizeof(Elf_Phdr) * _this->program_header_num);
 }
 
 static void _destructor(Elf_parser *const _this) {
   // fclose(_this->fp);
   free(_this->program_header);
+  fs_close(_this->fd);
 }
 
-static int parse_elf(Elf_parser *_this, char const *const fname) {
+static int parse_elf(Elf_parser *_this) {
 
   read_elf_header(_this);
 
@@ -90,12 +98,10 @@ static int parse_elf(Elf_parser *_this, char const *const fname) {
 
 static uintptr_t loader(PCB *pcb, const char *filename) {
   Log("call loader");
-  Elf_parser _this[1] = {{
-      .is_elf = true,
-      .program_header_num = 0,
-  }};
-  parse_elf(_this, filename);
-
+  Elf_parser _this[1] = {{.is_elf = true,
+                          .program_header_num = 0, //
+                          .fd = fs_open(filename, 0, 0)}};
+  parse_elf(_this);
   // TODO: we don't support large program_header_num now;
   assert(_this->program_header_num);
 
@@ -105,7 +111,10 @@ static uintptr_t loader(PCB *pcb, const char *filename) {
     Elf_Phdr const *const p = _this->program_header + i;
 
     uint8_t *buffer = (uint8_t *)malloc(sizeof(uint8_t) * p->p_memsz);
-    ramdisk_read(buffer, p->p_offset, p->p_filesz);
+    fs_lseek(_this->fd, p->p_offset, SEEK_SET);
+    fs_read(_this->fd, buffer, p->p_filesz);
+    // ramdisk_read(buffer, p->p_offset, p->p_filesz);
+
     assert(p->p_memsz >= p->p_filesz);
     memset(buffer + p->p_filesz, 0, p->p_memsz - p->p_filesz);
 
@@ -113,7 +122,7 @@ static uintptr_t loader(PCB *pcb, const char *filename) {
     /*set to zero*/
     Log("load ELF to [0x%x, 0x%x)", p->p_vaddr, p->p_vaddr + p->p_filesz);
   }
-  
+
   uintptr_t const res = _this->entry_point;
 
   _destructor(_this);

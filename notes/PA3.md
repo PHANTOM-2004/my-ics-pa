@@ -526,6 +526,7 @@ return value <= a0
 # HAS_NAVY = 1
 ```
 这里被注释掉了, 这就导致无法建立符号链接, 缺少头文件和镜像. 所以需要取消注释.
+> 其实这里不是个坑, 不过似乎当时注释掉(在build navy的时候)就出现了链接问题. 后面发现应该是没影响的. 
 
 > 添加一个系统调用比你想象中要简单, 所有信息都已经准备好了. 我们只需要在分发的过程中添加相应的系统调用号, 并编写相应的系统调用处理函数`sys_xxx()`, 然后调用它即可. 回过头来看`dummy`程序, 它触发了一个`SYS_yield`系统调用. 我们约定, 这个系统调用直接调用CTE的`yield()`即可, 然后返回`0`.
 
@@ -724,3 +725,40 @@ static int sys_write(int fd, void const *buf, size_t count) {
 
 -- -- 
 ## `TODO`:  `FTRACE`支持多个文件
+
+-- -- 
+
+## 简单的文件系统
+
+但在真实的操作系统中, 这种直接用文件名来作为读写操作参数的做法却有所缺陷. 例如, 我们在用`less`工具浏览文件的时候:
+
+```
+cat file | less
+```
+
+`cat`工具希望把文件内容写到`less`工具的标准输入中, 但我们却无法用文件名来标识`less`工具的标准输入! 实际上, 操作系统中确实存在不少"没有名字"的文件. 为了统一管理它们, 我们希望通过一个编号来表示文件, 这个编号就是文件描述符(file descriptor).
+
+> 在Nanos-lite中, 由于sfs的文件数目是固定的, 我们可以简单地把文件记录表的下标作为相应文件的文件描述符返回给用户程序. 在这以后, 所有文件操作都通过文件描述符来标识文件:
+
+
+实现文件操作
+```c
+int fs_open(const char *pathname, int flags, int mode);
+size_t fs_read(int fd, void *buf, size_t len);
+size_t fs_write(int fd, const void *buf, size_t len);
+size_t fs_lseek(int fd, size_t offset, int whence);
+int fs_close(int fd);
+```
+
+测试时不要忘记: 
+![](assets/Pasted%20image%2020240805163841.png)
+
+
+![](assets/Pasted%20image%2020240805183045.png)
+其实如果`update`之后就会发现这个问题, 这是显然的. 因为这个时候`ramdisk`根本就不是一个`elf`文件. 他是前面一部分放的文件, 后面一部分是程序. 
+
+
+![](assets/Pasted%20image%2020240805183218.png)
+这就是为什么需要让`loader`使用文件. 
+
+
