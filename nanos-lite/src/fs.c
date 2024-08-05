@@ -23,11 +23,13 @@ size_t invalid_write(const void *buf, size_t offset, size_t len) {
   return 0;
 }
 
+extern size_t serial_write(void const *buf, size_t offset, size_t len);
+
 /* This is the information about all files in disk. */
 static Finfo file_table[] __attribute__((used)) = {
     [FD_STDIN] = {"stdin", 0, 0, invalid_read, invalid_write},
-    [FD_STDOUT] = {"stdout", 0, 0, invalid_read, invalid_write},
-    [FD_STDERR] = {"stderr", 0, 0, invalid_read, invalid_write},
+    [FD_STDOUT] = {"stdout", 0, 0, invalid_read, serial_write},
+    [FD_STDERR] = {"stderr", 0, 0, invalid_read, serial_write},
 #include "files.h"
 };
 
@@ -107,17 +109,17 @@ size_t fs_read(int fd, void *buf, size_t len) {
 
   Log("read file size: %d, current pos: %d", file_table[fd].size, file_pos[fd]);
   assert(IS_FD_VALID(fd));
-  if (IS_STDIO(fd))
-    return 0; // read nothing
 
-  else if (file_pos[fd] > file_table[fd].size) {
+  if (file_table[fd].read != NULL)
+    return file_table[fd].read(buf, file_table[fd].disk_offset + file_pos[fd],
+                               len);
+
+  else if (file_pos[fd] > file_table[fd].size)
     return 0;
-  }
 
-  else if (file_pos[fd] + len > file_table[fd].size) {
+  else if (file_pos[fd] + len > file_table[fd].size)
     // if it go beyond
     len = file_table[fd].size - file_pos[fd];
-  }
 
   ramdisk_read(buf, file_table[fd].disk_offset + file_pos[fd], len);
   file_pos[fd] += len;
@@ -145,25 +147,16 @@ size_t fs_write(int fd, const void *buf, size_t len) {
 
   assert(IS_FD_VALID(fd));
 
-  if (fd == FD_STDIN)
+  if (file_table[fd].write != NULL)
+    return file_table[fd].write(buf, file_table[fd].disk_offset + file_pos[fd],
+                                len);
+
+  // pointer > size
+  else if (file_pos[fd] > file_table[fd].size)
     return 0;
 
-  else if (fd == FD_STDERR || fd == FD_STDOUT) {
-    size_t ret = 0;
-    for (size_t i = 0; i < len; i++) {
-      putch(((char const *)buf)[i]);
-      ret++;
-    }
-    return ret;
-  }
-
-  else if (file_pos[fd] > file_table[fd].size) {
-    return 0;
-  }
-
-  else if (file_pos[fd] + len > file_table[fd].size) {
+  else if (file_pos[fd] + len > file_table[fd].size)
     len = file_table[fd].size - file_pos[fd];
-  }
 
   Log("write file size: %d, current pos: %d", file_table[fd].size,
       file_pos[fd]);

@@ -761,4 +761,96 @@ int fs_close(int fd);
 ![](assets/Pasted%20image%2020240805183218.png)
 这就是为什么需要让`loader`使用文件. 
 
+-- -- 
+## 虚拟文件系统 
 
+> 不过在Nanos-lite中, 由于特殊文件的数量很少, 我们约定, 当上述的函数指针为`NULL`时, 表示相应文件是一个普通文件, 通过ramdisk的API来进行文件的读写, 这样我们就不需要为大多数的普通文件显式指定ramdisk的读写函数了.
+
+> 我们把文件看成字节序列, 大部分字节序列都是"静止"的, 例如对于ramdisk和磁盘上的文件, 如果我们不对它们进行修改, 它们就会一直位于同一个地方, 这样的字节序列具有"位置"的概念; 但有一些特殊的字节序列并不是这样, 例如键入按键的字节序列是"流动"的, 被读出之后就不存在了, 这样的字节序列中的字节之间只有顺序关系, 但无法编号, 因此它们没有"位置"的概念. 属于前者的文件支持`lseek`操作, 存储这些文件的设备称为"块设备"; 而属于后者的文件则不支持`lseek`操作, 相应的设备称为"字符设备". 真实的操作系统还会对`lseek`操作进行抽象, 我们在Nanos-lite中进行了简化, 就不实现这一抽象了.
+
+-- --
+
+## `OS`中的`IOE`
+
+### 输出
+
+> 首先当然是来看最简单的输出设备: 串口. 在Nanos-lite中, `stdout`和`stderr`都会输出到串口. 之前你可能会通过判断`fd`是否为`1`或`2`, 来决定`sys_write()`是否写入到串口. 现在有了VFS, 我们就不需要让系统调用处理函数关心这些特殊文件的情况了: 我们只需要在`nanos-lite/src/device.c`中实现`serial_write()`, 然后在文件记录表中设置相应的写函数, 就可以实现上述功能了. 由于串口是一个字符设备, 对应的字节序列没有"位置"的概念, 因此`serial_write()`中的`offset`参数可以忽略. 另外Nanos-lite也不打算支持`stdin`的读入, 因此在文件记录表中设置相应的报错函数即可.
+
+### `timeofday`
+
+> 实现`gettimeofday`系统调用, 这一系统调用的参数含义请RTFM. 实现后, 在`navy-apps/tests/`中新增一个`timer-test`测试, 在测试中通过`gettimeofday()`获取当前时间, 并每过0.5秒输出一句话.
+
+```
+DESCRIPTION  
+      The functions gettimeofday() and settimeofday() can get and set the time as well as a timezone.  
+  
+      The tv argument is a struct timeval (as specified in <sys/time.h>):  
+  
+          struct timeval {  
+              time_t      tv_sec;     /* seconds */  
+              suseconds_t tv_usec;    /* microseconds */  
+          };  
+  
+      and gives the number of seconds and microseconds since the Epoch (see time(2)).  
+  
+      The tz argument is a struct timezone:  
+  
+          struct timezone {  
+              int tz_minuteswest;     /* minutes west of Greenwich */  
+              int tz_dsttime;         /* type of DST correction */  
+          };
+```
+
+我们可以看一个简单例子
+```c
+#include <sys/time.h>  
+#include <stdio.h>  
+  
+int main() {  
+   struct timeval tv;  
+   struct timezone tz;  
+  
+   // 调用 gettimeofday() 函数获取当前时间e  
+   if (gettimeofday(&tv, &tz) != 0) {  
+       perror("gettimeofday failed");  
+       return 1;  
+   }  
+  
+   // 输出当前时间t  
+   printf("Current time: %ld seconds, %ld microseconds\n",  
+          tv.tv_sec, tv.tv_usec);  
+  
+   // 输出时区信息e  
+   printf("Timezone: %d minutes west of Greenwich, DST correction: %d\n",  
+          tz.tz_minuteswest, tz.tz_dsttime);  
+  
+   return 0;  
+}
+```
+
+有如下输出:
+```
+Current time: 1722860988 seconds, 116871 microseconds  
+Timezone: 0 minutes west of Greenwich, DST correction: 0
+```
+
+```c
+int main() {
+  struct timeval tv[1];
+  uint64_t last = 0;
+  uint64_t current = 0;
+  int t = 100;
+  while (t) {
+    gettimeofday(tv, NULL);
+    current = (tv->tv_sec * 1000000 + tv->tv_usec) / 1000; // get ms
+    if (current - last >= 500) {
+      t--;
+      printf("TIME: %d\n", (int)current);
+      last = current;
+    }
+  }
+  return 0;
+}
+```
+
+不过其实这里如果按照从`epoch`的时间其实也可以, 不过会有一点麻烦, 需要我们在`am`之中添加一个接口. 以及`nemu`中添加一个接口, 获得从`unix Epoch`的时间. 

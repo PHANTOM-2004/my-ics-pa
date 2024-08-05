@@ -54,6 +54,10 @@ static void print_single_syscall(int const i) {
   case SYS_close:
     printf("sys_close[fd=%d]\n", p.a0);
     break;
+  case SYS_gettimeofday:
+    //printf("sys_gettimeofday[&tv=%x &tz=%x]\n", p.a0, p.a1);
+    printf("--get tv [%d]\n", *(int*)p.a0);
+    break;
   default:
     panic("Unknown syscall ID = %d", p.event_type);
   }
