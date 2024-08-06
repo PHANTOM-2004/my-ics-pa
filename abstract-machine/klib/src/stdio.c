@@ -12,6 +12,12 @@
 
 #define min(a, b) (a) < (b) ? (a) : (b)
 
+enum {
+  LONG_TYPE,
+  LONG_LONG_TYPE,
+  NONE_TYPE,
+};
+
 typedef struct {
   size_t width;
   size_t buffer_filled_len;
@@ -27,10 +33,12 @@ typedef struct {
   char *const out_dst;
 
   char str_buffer[STRING_BUFFER_SIZE];
-  int val_int;
-  unsigned val_uint;
+  int64_t val_int;
+  uint64_t val_uint;
   char val_char;
   uintptr_t val_uptr;
+  int int_type;
+
 } printfParser;
 
 typedef void (*buffer_handler_t)(printfParser *const _this);
@@ -133,6 +141,7 @@ static void _itoa(printfParser *const _this) {
   do {
     *buf_pos = _this->val_int % 10 + '0';
     assert(isdigit(*buf_pos));
+    putch(*buf_pos);
     _this->val_int /= 10;
     length++;
     buf_pos--;
@@ -148,16 +157,16 @@ static void _itoa(printfParser *const _this) {
   _this->cur_out_str = buf_pos + 1;
 }
 
-static void _utoa(printfParser *const _this, uint64_t num, unsigned const base,
+static void _utoa(printfParser *const _this, unsigned const base,
                   bool const upper) {
   int length = 0;
   char *buf_pos = _this->str_buffer + STRING_BUFFER_SIZE - 1;
   do {
-    *buf_pos = (char)itohex(num % base, upper);
-    num /= base;
+    *buf_pos = (char)itohex(_this->val_uint % base, upper);
+    _this->val_uint /= base;
     length++;
     buf_pos--;
-  } while (num);
+  } while (_this->val_uint);
 
   _this->cur_out_len = length;
   _this->cur_out_str = buf_pos + 1;
@@ -176,11 +185,25 @@ static char const *parse_format(printfParser *const parser, char const *p) {
     p++;
     assert(*p); // else invalid expression
 
+    // now read int type
+    if(*p == 'l'){
+      p++;
+      putch('l');
+      parser->int_type = LONG_TYPE;
+    }
+
+    if(*p == 'l'){
+      p++;
+      putch('l');
+      parser->int_type = LONG_LONG_TYPE;
+    }
+
     // if conversion
     parser->is_conversion = is_conversion(*p);
     parser->width = 0;
-    if (parser->is_conversion)
+    if (parser->is_conversion){
       return p;
+    }
 
     // now read flag
     parser->is_flag = is_flag(*p);
@@ -199,6 +222,8 @@ static char const *parse_format(printfParser *const parser, char const *p) {
       assert(isdigit(*p));
       p++;
     }
+    
+
     // then it is conversion
     parser->is_conversion = true; // p point to conversion
   }
@@ -219,6 +244,7 @@ static int _printf_base(char *out, char const *fmt, size_t const n,
       .cur_out_len = 0,
       .cur_out_str = NULL,
       .out_dst = out,
+      .int_type = NONE_TYPE,
   }};
 
   for (char const *p = fmt; *p;) {
@@ -228,7 +254,13 @@ static int _printf_base(char *out, char const *fmt, size_t const n,
       switch (*p) {
       case 'd':
         /*This is for int type*/
-        parser->val_int = va_arg(ap, int);
+        if (parser->int_type == LONG_TYPE)
+          parser->val_int = va_arg(ap, long int);
+        else if (parser->int_type == LONG_LONG_TYPE)
+          parser->val_int = va_arg(ap, long long int);
+        else
+          parser->val_int = va_arg(ap, int);
+
         _itoa(parser);
         break;
 
@@ -244,19 +276,25 @@ static int _printf_base(char *out, char const *fmt, size_t const n,
         break;
 
       case 'u':
-        parser->val_uint = va_arg(ap, unsigned int);
-        _utoa(parser, parser->val_uint, 10, 0);
+        if (parser->int_type == LONG_TYPE)
+          parser->val_uint = va_arg(ap, unsigned long int);
+        else if (parser->int_type == LONG_LONG_TYPE)
+          parser->val_uint = va_arg(ap, unsigned long long int);
+        else
+          parser->val_uint = va_arg(ap, unsigned int);
+
+        _utoa(parser, 10, 0);
         break;
 
       case 'x':
       case 'X':
         parser->val_uint = va_arg(ap, unsigned int);
-        _utoa(parser, parser->val_uint, 16, *p == 'X');
+        _utoa(parser, 16, *p == 'X');
         break;
       case 'p':
       case 'P':
         parser->val_uptr = va_arg(ap, uintptr_t);
-        _utoa(parser, parser->val_uptr, 16, *p == 'P');
+        _utoa(parser, 16, *p == 'P');
         break;
 
       default: // not %
@@ -266,6 +304,7 @@ static int _printf_base(char *out, char const *fmt, size_t const n,
         panic("Not implemented");
       }
       // go to next
+      parser->int_type = NONE_TYPE;
       p++;
     } else {
       p = parse_format(parser, p);
