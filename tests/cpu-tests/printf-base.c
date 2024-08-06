@@ -14,5 +14,8 @@ int main() {
   printf("%d + %d = %d\n", 2, 10, 12);
   
   printf("Unhandled syscall ID = %d\n", 0);
+
+  printf("lu: %lu\n", 129111112112lu);
+  printf("llu: %llu\n", 12928382111112112llu);
   return 0;
 }

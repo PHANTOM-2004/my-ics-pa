@@ -1,11 +1,8 @@
-#include "klib-macros.h"
 #include <am.h>
 #include <nemu.h>
 #include <stdint.h>
 
-
-void __am_timer_init() {
-}
+void __am_timer_init() {}
 
 /*
 enum { AM_TIMER_UPTIME = (6) };
@@ -19,7 +16,7 @@ void __am_timer_uptime(AM_TIMER_UPTIME_T *uptime) {
   uint64_t const _read_time_lo = *(uint32_t *)(uintptr_t)(RTC_ADDR);
 
   uint64_t const _read_time = (_read_time_hi << 32) | _read_time_lo;
-  uptime->us = _read_time ;//- boot_time.us;
+  uptime->us = _read_time; //- boot_time.us;
 }
 
 void __am_timer_rtc(AM_TIMER_RTC_T *rtc) {
@@ -29,4 +26,13 @@ void __am_timer_rtc(AM_TIMER_RTC_T *rtc) {
   rtc->day = 0;
   rtc->month = 0;
   rtc->year = 1900;
+}
+
+void __am_timer_unix_epoch(AM_TIMER_UNIX_EPOCH_T *ut) {
+
+  uint64_t const _read_time_hi = *(uint32_t *)(uintptr_t)(RTC_ADDR + 12);
+  uint64_t const _read_time_lo = *(uint32_t *)(uintptr_t)(RTC_ADDR + 8);
+
+  uint64_t const _read_time = (_read_time_hi << 32) | _read_time_lo;
+  ut->us = _read_time; //- boot_time.us;
 }

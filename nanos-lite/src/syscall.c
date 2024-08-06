@@ -1,4 +1,5 @@
 #include "syscall.h"
+#include "amdev.h"
 #include "fs.h"
 #include "log.h"
 #include <common.h>
@@ -40,7 +41,7 @@ static int sys_gettimeofday(struct timeval *tv, struct timezone *tz) {
   // On error, -1 is returned and errno is set to indicate the error.
   int res = -1;
   if (tv) {
-    uint64_t const us =  io_read(AM_TIMER_UPTIME).us;
+    uint64_t const us =  io_read(AM_TIMER_UNIX_EPOCH).us;
     tv->tv_sec = us / 1000000;
     tv->tv_usec = us % 1000000;
     res = 0;
