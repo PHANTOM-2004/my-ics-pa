@@ -857,5 +857,86 @@ int main() {
 
 
 ![](assets/Pasted%20image%2020240806141043.png)
-这里我尝试添加了一下, 并不复杂, `nemu -> am -> os`这三个层面增加即可. 实际上在输出的过程中还发现了, `libc`提供的输出并不支持`64`位输出. 
+这里我尝试添加了一下, 并不复杂, `nemu -> am -> os`这三个层面增加即可. 实际上在输出的过程中还发现了, `libc`提供的+输出并不支持`64`位输出. 
 
+### `NDL: gettick`
+
+在`timer-test`中使用`NDL`, 这里稍微读一下`Makefile`, 我们需要修改`timer-test`的`Makefile`
+```makefile
+NAME = timer-test
+SRCS = main.c
+LIBS = libndl # 链接libndl库
+include $(NAVY_HOME)/Makefile
+```
+
+### `NDL: events read`
+
+  
+你需要:
+
+- 实现`events_read()`(在`nanos-lite/src/device.c`中定义), 把事件写入到`buf`中, 最长写入`len`字节, 然后返回写入的实际长度. 其中按键名已经在字符串数组`names`中定义好了, 你需要借助IOE的API来获得设备的输入. 另外, 若当前没有有效按键, 则返回0即可.
+- 在VFS中添加对`/dev/events`的支持.
+- 在NDL中实现`NDL_PollEvent()`, 从`/dev/events`中读出事件并写入到`buf`中.
+
+我们可以假设一次最多只会读出一个事件, 这样可以简化你的实现. 实现后, 让Nanos-lite运行`navy-apps/tests/event-test`, 如果实现正确, 敲击按键时程序会输出按键事件的信息.
+
+> - 按下按键事件, 如`kd RETURN`表示按下回车键
+> - 松开按键事件, 如`ku A`表示松开`A`键
+
+### `NDL: frame buffer`
+
+> Nanos-lite和Navy约定, 屏幕大小的信息通过`/proc/dispinfo`文件来获得, 它需要支持读操作. `navy-apps/README.md`中对这个文件内容的格式进行了约定, 你需要阅读它. 至于具体的屏幕大小, 你需要通过IOE的相应API来获取.
+
+2. procfs文件系统: 所有的文件都是key-value pair, 格式为` [key] : [value]`, 冒号左右可以有任意多(0个或多个)的空白字符(whitespace).
+ * `/proc/dispinfo`: 屏幕信息, 包含的keys: `WIDTH`表示宽度, `HEIGHT`表示高度.
+ * `/proc/cpuinfo`(可选): CPU信息.
+ * `/proc/meminfo`(可选): 内存信息.
+
+例如一个合法的 `/proc/dispinfo`文件例子如下:
+```
+WIDTH : 640
+HEIGHT:480
+```
+
+```c
+// 打开一张(*w) X (*h)的画布
+// 如果*w和*h均为0, 则将系统全屏幕作为画布, 并将*w和*h分别设为系统屏幕的大小
+void NDL_OpenCanvas(int *w, int *h);
+```
+
+
+```c
+  char buf[64];
+  int const fd = open("/proc/dispinfo", 0);
+  read(fd, buf, sizeof(buf));
+  sscanf(buf, "WIDTH:%d\nHEIGHT:%d\n", &screen_w, &screen_h);
+  if (*w == 0 || *h == 0 || *w > screen_w || *h > screen_h)
+    *w = screen_w, *h = screen_h;
+  //printf("open: %d x %d\n", *w, *h);
+```
+
+- 在`init_fs()`(在`nanos-lite/src/fs.c`中定义)中对文件记录表中`/dev/fb`的大小进行初始化.
+- 实现`fb_write()`(在`nanos-lite/src/device.c`中定义), 用于把`buf`中的`len`字节写到屏幕上`offset`处. 你需要先从`offset`计算出屏幕上的坐标, 然后调用IOE来进行绘图. 另外我们约定每次绘图后总是马上将frame buffer中的内容同步到屏幕上.
+- 在NDL中实现`NDL_DrawRect()`, 通过往`/dev/fb`中的正确位置写入像素信息来绘制图像. 你需要梳理清楚系统屏幕(即frame buffer), `NDL_OpenCanvas()`打开的画布, 以及`NDL_DrawRect()`指示的绘制区域之间的位置关系.
+
+首先`fb_write`中的`offset`是对于整个屏幕`buffer`的偏移量. 
+> 这里必须注意, 我们有了`offset`, 可以计算出来在`x,y`点开始画长度为`len`的东西, 但是这个`len`是什么呢? 我们在`fb_write`中调用`am`的接口画一个长方形, 但是我们发现, 这里丧失了高度信息. 所以说, 高度恒为1, `len`就是宽度. 因此每次调用, 都是写一行. 
+```c
+size_t fb_write(const void *buf, size_t offset, size_t len) {
+  // AM_GPU_FBDRAW_T am_fb[1] = { {.} } io_write(AM_GPU_FBDRAW);
+  static uint32_t v_width = 0, v_height = 0;
+  if (!v_width || !v_height) {
+    AM_GPU_CONFIG_T const gconfig = io_read(AM_GPU_CONFIG);
+    v_height = gconfig.height, v_width = gconfig.width;
+  }
+
+  uint32_t const w_t = offset % v_width;
+  uint32_t const h_t = offset / v_width;
+  io_write(AM_GPU_FBDRAW, w_t, h_t, (void *)buf, len, 1, true);
+  return 0;
+}
+```
+
+然后调用`NDL_DrawRect`是为了在`x,y`处画一个`w*h`的长方形. 
+
+![](assets/Pasted%20image%2020240806173713.png)

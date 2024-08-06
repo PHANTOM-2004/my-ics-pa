@@ -141,7 +141,6 @@ static void _itoa(printfParser *const _this) {
   do {
     *buf_pos = _this->val_int % 10 + '0';
     assert(isdigit(*buf_pos));
-    putch(*buf_pos);
     _this->val_int /= 10;
     length++;
     buf_pos--;
@@ -188,13 +187,11 @@ static char const *parse_format(printfParser *const parser, char const *p) {
     // now read int type
     if(*p == 'l'){
       p++;
-      putch('l');
       parser->int_type = LONG_TYPE;
     }
 
     if(*p == 'l'){
       p++;
-      putch('l');
       parser->int_type = LONG_LONG_TYPE;
     }
 
@@ -246,6 +243,9 @@ static int _printf_base(char *out, char const *fmt, size_t const n,
       .out_dst = out,
       .int_type = NONE_TYPE,
   }};
+
+  static const char* T = "CALL KLIB PRINTF\n";
+  while(*T) putch(*T++);
 
   for (char const *p = fmt; *p;) {
     if (parser->is_conversion) {

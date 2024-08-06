@@ -1,4 +1,6 @@
+#include "amdev.h"
 #include <fs.h>
+#include <stdint.h>
 
 typedef size_t (*ReadFn)(void *buf, size_t offset, size_t len);
 typedef size_t (*WriteFn)(const void *buf, size_t offset, size_t len);
@@ -11,7 +13,7 @@ typedef struct {
   WriteFn write;
 } Finfo;
 
-enum { FD_STDIN, FD_STDOUT, FD_STDERR, FD_FB };
+enum { FD_STDIN, FD_STDOUT, FD_STDERR, FD_EVENTS, FD_DISP, FD_FB };
 
 size_t invalid_read(void *buf, size_t offset, size_t len) {
   panic("should not reach here");
@@ -24,12 +26,18 @@ size_t invalid_write(const void *buf, size_t offset, size_t len) {
 }
 
 extern size_t serial_write(void const *buf, size_t offset, size_t len);
+extern size_t events_read(void *buf, size_t offset, size_t len);
+extern size_t fb_write(const void *buf, size_t offset, size_t len);
+extern size_t dispinfo_read(void *buf, size_t offset, size_t len);
 
 /* This is the information about all files in disk. */
 static Finfo file_table[] __attribute__((used)) = {
     [FD_STDIN] = {"stdin", 0, 0, invalid_read, invalid_write},
     [FD_STDOUT] = {"stdout", 0, 0, invalid_read, serial_write},
     [FD_STDERR] = {"stderr", 0, 0, invalid_read, serial_write},
+    [FD_EVENTS] = {"/dev/events", 0, 0, events_read, invalid_write},
+    [FD_DISP] = {"/proc/dispinfo", 0, 0, dispinfo_read, invalid_write},
+    [FD_FB] = {"/dev/fb", 0, 0, invalid_read, fb_write},
 #include "files.h"
 };
 
@@ -50,7 +58,7 @@ int fs_open(const char *pathname, int flags, int mode) {
     break;
   }
 
-  Log("Open [fd=%d], total [%d]", descriptor, FS_TABLE_LEN);
+  // Log("Open [fd=%d], total [%d]", descriptor, FS_TABLE_LEN);
   assert(IS_FD_VALID(descriptor));
   file_pos[descriptor] = 0; // when open the pos is set to zero
   /*The  return  value  of open() is a file descriptor, a small,
@@ -94,7 +102,7 @@ size_t fs_lseek(int fd, size_t offset, int whence) {
   /* Upon successful completion, lseek() returns the resulting offset location
    * as measured in bytes from the beginning of the file.  On error, the value
    * (off_t) -1 is returned and errno is set to indicate the error.*/
-  Log("seek return 0x%x[%d]", file_pos[fd], file_pos[fd]);
+  // Log("seek return %x [%d]", file_pos[fd], file_pos[fd]);
   return file_pos[fd];
 }
 
@@ -107,7 +115,8 @@ size_t fs_read(int fd, void *buf, size_t len) {
   /*if it goes beyond, zero is returned */
   extern size_t ramdisk_read(void *buf, size_t offset, size_t len);
 
-  Log("read file size: %d, current pos: %d", file_table[fd].size, file_pos[fd]);
+  // Log("read file name %s, size: %d, current pos: %d", file_table[fd].name,
+  //    file_table[fd].size, file_pos[fd]);
   assert(IS_FD_VALID(fd));
 
   if (file_table[fd].read != NULL)
@@ -172,4 +181,9 @@ int fs_close(int fd) {
 }
 void init_fs() {
   // TODO: initialize the size of /dev/fb
+  AM_GPU_CONFIG_T const gconfig = io_read(AM_GPU_CONFIG);
+  uint32_t const w = gconfig.width;
+  uint32_t const h = gconfig.height;
+  file_table[FD_FB].size = w * h * sizeof(uint32_t);
+  file_table[FD_FB].disk_offset = 0; // suppose is zero
 }
