@@ -211,7 +211,6 @@ static char const *parse_format(printfParser *const parser, char const *p) {
     }
 
     // now read witdh
-    printf("%s", p);
     assert(*p && isdigit(*p));
     parser->width = atoi(p);
 
@@ -293,7 +292,7 @@ static int _printf_base(char *out, char const *fmt, size_t const n,
         break;
       case 'p':
       case 'P':
-        parser->val_uptr = va_arg(ap, uintptr_t);
+        parser->val_uint = va_arg(ap, uintptr_t);
         _utoa(parser, 16, *p == 'P');
         break;
 

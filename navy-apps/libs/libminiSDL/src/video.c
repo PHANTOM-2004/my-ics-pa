@@ -1,4 +1,5 @@
 #include <NDL.h>
+#include <stdio.h>
 #include <assert.h>
 #include <sdl-video.h>
 #include <stdint.h>

@@ -948,3 +948,243 @@ size_t fb_write(const void *buf, size_t offset, size_t len) {
 > 假设有一个`void *p`的指针变量, 它指向了一个32位变量, 这个变量的本质是`float`类型, 它的真值落在`fixedpt`类型可表示的范围中. 如果我们定义一个新的函数`fixedpt fixedpt_fromfloat(void *p)`, 如何在不引入浮点指令的情况下实现它?
 
 这里只能把他当成一个整数, 然后按照位操纵遵循IEEE754, 解析为定点数. 
+
+## 关于`native`
+
+```makefile
+env:
+	$(MAKE) -C $(NAVY_HOME)/libs/libos ISA=native
+
+run: app env
+	@LD_PRELOAD=$(NAVY_HOME)/libs/libos/build/native.so $(APP) $(mainargs)
+
+gdb: app env
+	@gdb -ex "set environment LD_PRELOAD $(NAVY_HOME)/libs/libos/build/native.so" --args $(APP) $(mainargs)
+
+.PHONY: env run gdb
+```
+
+这里因为我们注入了自己的库, 因此系统调用打开的时候实际上依赖自己的库打开. 
+
+## `miniSDL`
+
+这里参考`Archwiki`, [SDL](https://wiki.archlinux.org/title/SDL)
+
+[`SDL_UpdateRect`](https://www.libsdl.org/release/SDL-1.2.15/docs/html/sdlupdaterect.html)
+```c
+void render() {
+  if (slide) {
+    SDL_FreeSurface(slide);
+  }
+  char fname[256];
+  sprintf(fname, path, cur);
+  slide = SDL_LoadBMP(fname);
+  assert(slide);
+  SDL_UpdateRect(slide, 0, 0, 0, 0);
+}
+```
+可以看到在`nslider`中每次使用这个更新整个屏幕. 
+
+这个实现是显然的.
+```c
+void SDL_UpdateRect(SDL_Surface *s, int x, int y, int w, int h) {
+  /* Makes sure the given area is updated on the given screen.
+   * The rectangle must be confined within the screen boundaries (no clipping is
+  done).
+
+  If 'x', 'y', 'w' and 'h' are all 0, SDL_UpdateRect will update the entire
+  screen.
+
+  This function should not be called while 'screen' is locked.
+   * */
+
+  if (!x && !y && !w && !h)
+    NDL_DrawRect((uint32_t *)s->pixels, 0, 0, s->w, s->h);
+  else
+    NDL_DrawRect((uint32_t *)s->pixels, x, y, w, h);
+}
+```
+
+接下来实现`SDL_WaitEvent`, 我们参照调用者
+```c
+  while (1) {
+    SDL_Event e;
+    SDL_WaitEvent(&e);
+
+    if (e.type == SDL_KEYDOWN) {
+      switch(e.key.keysym.sym) {
+        case SDLK_0: rep = rep * 10 + 0; break;
+        case SDLK_1: rep = rep * 10 + 1; break;
+        case SDLK_2: rep = rep * 10 + 2; break;
+        case SDLK_3: rep = rep * 10 + 3; break;
+        case SDLK_4: rep = rep * 10 + 4; break;
+        case SDLK_5: rep = rep * 10 + 5; break;
+        case SDLK_6: rep = rep * 10 + 6; break;
+        case SDLK_7: rep = rep * 10 + 7; break;
+        case SDLK_8: rep = rep * 10 + 8; break;
+        case SDLK_9: rep = rep * 10 + 9; break;
+        case SDLK_J:
+        case SDLK_DOWN: next(rep); rep = 0; g = 0; break;
+        case SDLK_K:
+        case SDLK_UP: prev(rep); rep = 0; g = 0; break;
+        case SDLK_G:
+          g ++;
+          if (g > 1) {
+            prev(100000);
+            rep = 0; g = 0;
+          }
+          break;
+      }
+    }
+  }
+```
+
+并且按照[wiki](https://wiki.libsdl.org/SDL2/SDL_WaitEvent)
+
+```c
+void SDL_FillRect(SDL_Surface *dst, SDL_Rect *dstrect, uint32_t color) {
+  /*typedef struct {
+          int16_t x, y;
+          uint16_t w, h;
+  } SDL_Rect;
+  */
+  // suppose the sequence is ARGB
+  int x, y, w, h;
+  /*the SDL_Rect structure representing the rectangle to fill,
+   * or NULL to fill the entire surface. Uint32	color	the color to fill
+   * with.*/
+  if (dstrect == NULL) {
+    x = 0;
+    y = 0;
+    w = dst->w;
+    h = dst->h;
+  } else {
+    x = dstrect->x;
+    y = dstrect->y;
+    w = dstrect->w;
+    h = dstrect->h;
+  }
+
+  uint32_t const _color =
+      SDL_MapRGBA(dst->format, (color >> 16) & 0xff, (color >> 8) & 0xff,
+                  color & 0xff, (color >> 24) & 0xff);
+  uint32_t *pixel = (uint32_t *)dst->pixels;
+
+  //set pixel of the rectangle
+  for(int i = y; i < y + h ;i++){
+    for(int j = x; j < x + w;j++){
+      pixel[j + i * dst->w] = color;
+    }
+  }
+
+  NDL_DrawRect(pixel, x, y, w, h);
+}
+```
+这里只需要选择好大小, 然后调用函数获得像素值, 再把对应的一片区域设置成这个像素值即可. 
+
+```c
+void SDL_BlitSurface(SDL_Surface *src, SDL_Rect *srcrect, SDL_Surface *dst,
+                     SDL_Rect *dstrect) {
+  assert(dst && src);
+  assert(dst->format->BitsPerPixel == src->format->BitsPerPixel);
+  /*This performs a fast blit from the source surface to the destination
+ surface.
+
+ The width and height in srcrect determine the size of the copied rectangle.
+
+ Only the position is used in the dstrect (the width and height are ignored).
+ If srcrect is NULL, the entire surface is copied. If dstrect is NULL, then the
+ destination position (upper left corner) is (0, 0).
+
+ The final blit rectangle is saved in dstrect after all clipping is performed
+ (srcrect is not modified).
+
+ The blit function should not be called on a locked surface.*/
+  int const dx = dstrect ? dstrect->x : 0;
+  int const dy = dstrect ? dstrect->y : 0;
+
+  int const sx = srcrect ? srcrect->x : 0;
+  int const sy = srcrect ? srcrect->y : 0;
+
+  int const sw = srcrect ? srcrect->w : src->w;
+  int const sh = srcrect ? srcrect->h : src->h;
+
+  uint32_t *src_pixel = (uint32_t *)src->pixels;
+  uint32_t *dst_pixel = (uint32_t *)dst->pixels;
+
+  for (int i = 0; i < sh; i++) {
+    for (int j = 0; j < sw; j++) {
+      int const pos_src = (j + sx) + (i + sy) * src->w;
+      int const pos_dst = (j + dx) + (i + dy) * dst->w;
+      dst_pixel[pos_dst] = src_pixel[pos_src];
+    }
+  }
+}
+
+
+```
+
+![](assets/Pasted%20image%2020240807184702.png)
+
+这里我们之前已经把`SDL_PollEvent`实现过了, 这个是非阻塞的, 利用这个非阻塞的来实现阻塞的`SDL_WaitEvent`.
+
+![](assets/Pasted%20image%2020240807190205.png)
+
+### `bird`小游戏
+
+这里有一些找不到头文件的问题, 其实这个也很显然
+![](assets/Pasted%20image%2020240807192404.png)
+我的`linux`上面`SDL2`是齐全的, `SDL1`就不全了. 
+
+反正全装上得了. 
+```shell
+sudo pacman -S sdl_image sdl_mixer sdl_ttf
+```
+
+![](assets/Pasted%20image%2020240807195416.png)
+
+可以跑, 但是卡城`PPT`了. 可能是因为我没有使用优化并且打开了`trace`.
+
+这里遇到非常奇怪的`bug`, 当我把`differential test`关闭的时候, `miniSDL`一个内存会申请失败. 这个只会在`bird`这里出现. 
+
+我们分析一下这个问题, 实际上`differential test`打开的时候, 必然保证`nemu`的结果都是正确的. 也就是打开的时候, 我们`nemu`的实现是正确的. 但是关闭之后, 理论上来说应该也是正确的. 我们`nemu`中运行的指令没有变化. 因此这个`bug`的抽象层次应该在`nemu`. 但是我们在这里就不再深究了. 实际上非常奇怪, 因为这个`test`明明保证了我的正确性, 但是关闭之后反而不行. 
+
+有可能是`nemu` 出现了`UB`. 
+
+![](assets/Pasted%20image%2020240807214854.png)
+我们对比两个`log`
+
+这里仍然是没有解决的状态. 过于抽象
+
+```c
+static void trace_and_difftest(Decode *_this, vaddr_t dnpc) {
+#ifdef CONFIG_ITRACE_COND
+  if (ITRACE_COND) {
+    log_write("%s\n", _this->logbuf);
+  }
+#endif
+  if (g_print_step) {
+    IFDEF(CONFIG_ITRACE, puts(_this->logbuf));
+  }
+  IFDEF(CONFIG_DIFFTEST, difftest_step(_this->pc, dnpc));
+
+  // iring buffer
+  IFDEF(CONFIG_ITRACE_RINGBUF_ON, iringbuf_trace(_this->logbuf));
+
+  // ering buffer
+  IFDEF(CONFIG_ETRACE, eringbuf_trace(_this));
+  // ftrace
+  IFDEF(CONFIG_FTRACE, ftrace(_this));
+
+#ifdef CONFIG_CONFIG_WATCHPOINT
+  /*scan all the watch point here*/
+  int const ret = scan_watchpoint();
+  if (ret < 0) // hits
+    nemu_state.state = NEMU_STOP;
+#endif
+}
+```
+
+如果把那个` IFDEF(CONFIG_DIFFTEST, difftest_step(_this->pc, dnpc));` 注释掉, 但是`difftest`打开是没问题的.  这个`bug`我也没办法了. 
+
+

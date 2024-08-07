@@ -66,7 +66,7 @@ static void read_elf_header(Elf_parser *const _this) {
   assert(_this->elf_header.e_phentsize == sizeof(Elf_Phdr));
 
   _this->entry_point = _this->elf_header.e_entry;
-  Log("Entry: 0x%x", _this->entry_point);
+  Log("Entry: 0x%x", (unsigned)_this->entry_point);
   assert(_this->entry_point);
 }
 
@@ -127,6 +127,7 @@ static uintptr_t loader(PCB *pcb, const char *filename) {
 
   _destructor(_this);
 
+  assert(res);
   return res;
 }
 

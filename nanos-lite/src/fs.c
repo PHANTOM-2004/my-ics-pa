@@ -59,7 +59,10 @@ int fs_open(const char *pathname, int flags, int mode) {
   }
 
   // Log("Open [fd=%d], total [%d]", descriptor, FS_TABLE_LEN);
-  assert(IS_FD_VALID(descriptor));
+  if (!IS_FD_VALID(descriptor)) {
+    Log("%s", pathname);
+    assert(IS_FD_VALID(descriptor));
+  }
   file_pos[descriptor] = 0; // when open the pos is set to zero
   /*The  return  value  of open() is a file descriptor, a small,
    * nonnegative integer that is an index to an entry in the process's

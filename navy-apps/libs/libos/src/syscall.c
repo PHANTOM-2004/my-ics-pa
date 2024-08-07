@@ -1,6 +1,8 @@
 #include "syscall.h"
+#include "sys/unistd.h"
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
@@ -79,16 +81,22 @@ void *_sbrk(intptr_t increment) {
    * On error, (void *) -1 is returned, and errno is set to ENOMEM.
    */
   extern char end;
-  static intptr_t program_end = (intptr_t)&end;
+  static intptr_t program_break = (intptr_t)&end;
 
   int const syscall_ret = _syscall_(SYS_brk, increment, 0, 0);
   intptr_t res = -1;
   if (syscall_ret == 0) {
     // the syscall is success
     // then we need to adjust the heap
-    res = program_end;
-    program_end = (intptr_t)program_end + increment;
-  }
+    res = program_break;
+    program_break = program_break + increment;
+    /* 
+    char buf[100] = "";
+    snprintf(buf, sizeof(buf), "res: 0x%x incr: %x brk: %x\n", res, increment, program_break);
+    _write(1, buf, sizeof(buf));
+    */
+  } else
+    assert(0);
   return (void *)res;
 }
 
