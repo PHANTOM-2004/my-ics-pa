@@ -1187,4 +1187,5 @@ static void trace_and_difftest(Decode *_this, vaddr_t dnpc) {
 
 如果把那个` IFDEF(CONFIG_DIFFTEST, difftest_step(_this->pc, dnpc));` 注释掉, 但是`difftest`打开是没问题的.  这个`bug`我也没办法了. 
 
+鉴于这个神奇的`bug`. 我们无法关闭`difftest`. 并且再在`difftest`上面的手段也没有意义了. 因此我们的`PA3` 到此结束.
 
