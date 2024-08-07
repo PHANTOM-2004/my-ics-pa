@@ -185,12 +185,12 @@ static char const *parse_format(printfParser *const parser, char const *p) {
     assert(*p); // else invalid expression
 
     // now read int type
-    if(*p == 'l'){
+    if (*p == 'l') {
       p++;
       parser->int_type = LONG_TYPE;
     }
 
-    if(*p == 'l'){
+    if (*p == 'l') {
       p++;
       parser->int_type = LONG_LONG_TYPE;
     }
@@ -198,7 +198,7 @@ static char const *parse_format(printfParser *const parser, char const *p) {
     // if conversion
     parser->is_conversion = is_conversion(*p);
     parser->width = 0;
-    if (parser->is_conversion){
+    if (parser->is_conversion) {
       return p;
     }
 
@@ -219,7 +219,6 @@ static char const *parse_format(printfParser *const parser, char const *p) {
       assert(isdigit(*p));
       p++;
     }
-    
 
     // then it is conversion
     parser->is_conversion = true; // p point to conversion
@@ -244,8 +243,9 @@ static int _printf_base(char *out, char const *fmt, size_t const n,
       .int_type = NONE_TYPE,
   }};
 
-  static const char* T = "CALL KLIB PRINTF\n";
-  while(*T) putch(*T++);
+  /*const char *T = "CALL KLIB PRINTF\n";
+  while (*T)
+    putch(*T++);*/
 
   for (char const *p = fmt; *p;) {
     if (parser->is_conversion) {

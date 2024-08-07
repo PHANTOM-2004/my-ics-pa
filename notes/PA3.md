@@ -940,3 +940,11 @@ size_t fb_write(const void *buf, size_t offset, size_t len) {
 然后调用`NDL_DrawRect`是为了在`x,y`处画一个`w*h`的长方形. 
 
 ![](assets/Pasted%20image%2020240806173713.png)
+
+-- -- 
+
+## 定点算术
+
+> 假设有一个`void *p`的指针变量, 它指向了一个32位变量, 这个变量的本质是`float`类型, 它的真值落在`fixedpt`类型可表示的范围中. 如果我们定义一个新的函数`fixedpt fixedpt_fromfloat(void *p)`, 如何在不引入浮点指令的情况下实现它?
+
+这里只能把他当成一个整数, 然后按照位操纵遵循IEEE754, 解析为定点数. 
