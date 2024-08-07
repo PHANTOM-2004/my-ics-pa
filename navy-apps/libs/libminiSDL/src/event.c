@@ -25,13 +25,14 @@ int SDL_PollEvent(SDL_Event *ev) {
    * available.*/
   char event_buf[64] = "\0";
   int ret = NDL_PollEvent(event_buf, sizeof(event_buf));
-  if (!ret){
-    ev->key.keysym.sym = SDLK_NONE;
+  if (!ret) {
+    ev->type = SDL_NONE;
+    ev->key.keysym.sym = SDLK_NONE; // no key event
     return 0;
   }
   char keydown_buf[4] = "\0";
   char keycode_buf[32] = "\0";
-  ret = sscanf(event_buf ,"%s %s", keydown_buf, keycode_buf);
+  ret = sscanf(event_buf, "%s %s", keydown_buf, keycode_buf);
   assert(ret);
 
   if (strcmp(keydown_buf, "kd") == 0) {
@@ -62,7 +63,9 @@ int SDL_PollEvent(SDL_Event *ev) {
 int SDL_WaitEvent(SDL_Event *event) {
   /*(int) Returns 1 on success or 0 if there was an error while
    * waiting for events; call SDL_GetError() for more information.*/
-  SDL_PollEvent(event);
+  do {
+    SDL_PollEvent(event);
+  } while (event->type == SDL_NONE);
   return 1;
 }
 

@@ -21,6 +21,7 @@ enum SDL_EventType {
   SDL_KEYDOWN,
   SDL_KEYUP,
   SDL_USEREVENT,
+  SDL_NONE,
 };
 
 #define SDL_EVENTMASK(ev_type) (1u << (ev_type))

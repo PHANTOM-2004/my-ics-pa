@@ -9,9 +9,78 @@ void SDL_BlitSurface(SDL_Surface *src, SDL_Rect *srcrect, SDL_Surface *dst,
                      SDL_Rect *dstrect) {
   assert(dst && src);
   assert(dst->format->BitsPerPixel == src->format->BitsPerPixel);
+  /*This performs a fast blit from the source surface to the destination
+ surface.
+
+ The width and height in srcrect determine the size of the copied rectangle.
+
+ Only the position is used in the dstrect (the width and height are ignored).
+ If srcrect is NULL, the entire surface is copied. If dstrect is NULL, then the
+ destination position (upper left corner) is (0, 0).
+
+ The final blit rectangle is saved in dstrect after all clipping is performed
+ (srcrect is not modified).
+
+ The blit function should not be called on a locked surface.*/
+  int const dx = dstrect ? dstrect->x : 0;
+  int const dy = dstrect ? dstrect->y : 0;
+  
+  int const sx = srcrect ? srcrect->x : 0;
+  int const sy = srcrect ? srcrect->y : 0;
+
+  int const sw = srcrect ? srcrect->w : src->w;
+  int const sh = srcrect ? srcrect->h : src->h;
+
+  uint32_t *src_pixel = (uint32_t *)src->pixels;
+  uint32_t *dst_pixel = (uint32_t *)dst->pixels;
+
+  for (int i = 0; i < sh; i++) {
+    for (int j = 0; j < sw; j++) {
+      int const pos_src = (j + sx) + (i + sy) * src->w;
+      int const pos_dst = (j + dx) + (i + dy) * dst->w;
+      dst_pixel[pos_dst] = src_pixel[pos_src];
+    }
+  }
 }
 
-void SDL_FillRect(SDL_Surface *dst, SDL_Rect *dstrect, uint32_t color) {}
+void SDL_FillRect(SDL_Surface *dst, SDL_Rect *dstrect, uint32_t color) {
+  /*typedef struct {
+          int16_t x, y;
+          uint16_t w, h;
+  } SDL_Rect;
+  */
+  // suppose the sequence is ARGB
+  assert(dst);
+  int x, y, w, h;
+  /*the SDL_Rect structure representing the rectangle to fill,
+   * or NULL to fill the entire surface. Uint32	color	the color to fill
+   * with.*/
+  if (dstrect == NULL) {
+    x = 0;
+    y = 0;
+    w = dst->w;
+    h = dst->h;
+  } else {
+    x = dstrect->x;
+    y = dstrect->y;
+    w = dstrect->w;
+    h = dstrect->h;
+  }
+
+  uint32_t const _color =
+      SDL_MapRGBA(dst->format, (color >> 16) & 0xff, (color >> 8) & 0xff,
+                  color & 0xff, (color >> 24) & 0xff);
+  uint32_t *pixel = (uint32_t *)dst->pixels;
+
+  // set pixel of the rectangle
+  for (int i = y; i < y + h; i++) {
+    for (int j = x; j < x + w; j++) {
+      pixel[j + i * dst->w] = color;
+    }
+  }
+
+  NDL_DrawRect(pixel, x, y, w, h);
+}
 /*
  * typedef struct {
         uint32_t flags;
