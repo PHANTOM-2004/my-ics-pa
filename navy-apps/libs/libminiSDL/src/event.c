@@ -25,7 +25,7 @@ int SDL_PollEvent(SDL_Event *ev) {
    * available.*/
   char event_buf[64] = "\0";
   int ret = NDL_PollEvent(event_buf, sizeof(event_buf));
-  if (!ret) {
+  if (!ret) {// nothing read
     ev->type = SDL_NONE;
     ev->key.keysym.sym = SDLK_NONE; // no key event
     return 0;

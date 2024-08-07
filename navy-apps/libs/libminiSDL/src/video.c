@@ -24,7 +24,7 @@ void SDL_BlitSurface(SDL_Surface *src, SDL_Rect *srcrect, SDL_Surface *dst,
  The blit function should not be called on a locked surface.*/
   int const dx = dstrect ? dstrect->x : 0;
   int const dy = dstrect ? dstrect->y : 0;
-  
+
   int const sx = srcrect ? srcrect->x : 0;
   int const sy = srcrect ? srcrect->y : 0;
 
