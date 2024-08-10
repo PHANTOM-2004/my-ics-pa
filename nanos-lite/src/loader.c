@@ -46,7 +46,7 @@ typedef struct {
 static void read_elf_header(Elf_parser *const _this) {
   fs_lseek(_this->fd, 0, SEEK_SET);
   fs_read(_this->fd, &_this->elf_header, sizeof(Elf_Ehdr));
-  //ramdisk_read(&_this->elf_header, 0, sizeof(Elf_Ehdr));
+  // ramdisk_read(&_this->elf_header, 0, sizeof(Elf_Ehdr));
 
   _this->is_elf =
       *(uint32_t *)_this->elf_header.e_ident == 0x464c457f; // magic number
@@ -110,17 +110,24 @@ static uintptr_t loader(PCB *pcb, const char *filename) {
       continue;
     Elf_Phdr const *const p = _this->program_header + i;
 
-    uint8_t *buffer = (uint8_t *)malloc(sizeof(uint8_t) * p->p_memsz);
-    fs_lseek(_this->fd, p->p_offset, SEEK_SET);
-    fs_read(_this->fd, buffer, p->p_filesz);
-    // ramdisk_read(buffer, p->p_offset, p->p_filesz);
-
     assert(p->p_memsz >= p->p_filesz);
-    memset(buffer + p->p_filesz, 0, p->p_memsz - p->p_filesz);
+
+    uint8_t *buffer = (uint8_t *)malloc(sizeof(uint8_t) * p->p_filesz);
+    fs_lseek(_this->fd, p->p_offset, SEEK_SET);
+    fs_read(_this->fd, buffer, p->p_filesz); // read files_size
 
     memcpy((void *)(uintptr_t)p->p_vaddr, buffer, p->p_filesz);
+
+    memset((void *)((uintptr_t)p->p_paddr + (uintptr_t)p->p_filesz), 0,
+           p->p_memsz - p->p_filesz); // set to zero
+
+    // My immplementation before is that i alloc a buffer with size filesize,
+    // and set the last part zero, but i forget to copy the zero part.
+    // surely I wrote `copy size filesize`, but memsz >= filesize; It is I who
+    // does not set the memory zero ! memcpy((void *)(uintptr_t)p->p_vaddr,
+    // buffer, p->p_filesz);
     /*set to zero*/
-    Log("load ELF to [0x%x, 0x%x)", p->p_vaddr, p->p_vaddr + p->p_filesz);
+    Log("load ELF to [0x%x, 0x%x)", p->p_vaddr, p->p_vaddr + p->p_memsz);
   }
 
   uintptr_t const res = _this->entry_point;

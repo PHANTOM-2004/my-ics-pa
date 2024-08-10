@@ -26,7 +26,7 @@ void init_proc() {
   Log("Initializing processes...");
 
   // load program here
-  naive_uload(pcb, "/bin/bird");
+  naive_uload(pcb, "/bin/malloc-test");
 }
 
 Context* schedule(Context *prev) {
