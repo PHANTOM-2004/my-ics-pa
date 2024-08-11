@@ -1385,4 +1385,83 @@ R03      MTVEC   HEX: 0x800014c0        BINARY: 10000000 00000000 
 
 
 
+-- -- 
+
+## 必答题
+
+当我们终端中输入`./hello`的时候发生了什么. 启示这可以从刚刚实现的批处理系统找到答案. 
+我们`exit`的时候默认进入终端程序, 终端程序中输入命令实现运行某一个程序.
+
+```c
+static void sh_handle_cmd(const char *cmd) {
+  // parse the argument here
+  // now treat the cmd as file name
+
+  /* The  setenv()  function  adds  the  variable  name  to  the environment
+   with
+   * the value value, if name does not already exist.  If name does exist in the
+   * environment, then its value is changed to value if overwrite is
+       nonzero; if overwrite is zero, then the value of name is not changed
+       (and setenv() returns a success status).
+    This function makes copies of the strings pointed to by name and value (by
+   contrast with putenv(3)).*/
+  setenv("PATH", "/bin", 0);
+
+  /*The environment of the new process image is specified via the argument envp.
+   *The envp argument is an array of pointers to null-terminated strings and
+   must be terminated by a null pointer.*/
+  static char buf[256] = {};
+  strncpy(buf, cmd, sizeof(buf) - 1);
+  char *p = buf;
+  while (*p) {
+    if (*p == '\n')
+      *p = '\0';
+    p++;
+  }
+
+  char *const argv[] = {buf, NULL};
+  int const ret = execvp(buf, argv);
+  assert(ret != -1);
+}
+```
+
+那么真实的计算机也是同样的道理
+```shell
+strace ./a.out
+```
+
+我们可以看到上来开始的系统调用就是`execve`. 
+```
+execve("./a.out", ["./a.out"], 0x7ffdcdd92ec0 /* 78 vars */) = 0  
+brk(NULL)                               = 0x57c599b3e000  
+access("/etc/ld.so.preload", R_OK)      = -1 ENOENT (No such file or directory)  
+openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3  
+fstat(3, {st_mode=S_IFREG|0644, st_size=215875, ...}) = 0  
+mmap(NULL, 215875, PROT_READ, MAP_PRIVATE, 3, 0) = 0x74ca8509c000  
+close(3)                                = 0  
+openat(AT_FDCWD, "/usr/lib/libc.so.6", O_RDONLY|O_CLOEXEC) = 3  
+read(3, "\177ELF\2\1\1\3\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0\340_\2\0\0\0\0\0"..., 832) = 832  
+pread64(3, "\6\0\0\0\4\0\0\0@\0\0\0\0\0\0\0@\0\0\0\0\0\0\0@\0\0\0\0\0\0\0"..., 784, 64) = 784  
+fstat(3, {st_mode=S_IFREG|0755, st_size=2014520, ...}) = 0  
+mmap(NULL, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x74ca8509a000  
+pread64(3, "\6\0\0\0\4\0\0\0@\0\0\0\0\0\0\0@\0\0\0\0\0\0\0@\0\0\0\0\0\0\0"..., 784, 64) = 784  
+mmap(NULL, 2034616, PROT_READ, MAP_PRIVATE|MAP_DENYWRITE, 3, 0) = 0x74ca84ea9000  
+mmap(0x74ca84ecd000, 1511424, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x24000) = 0x74ca84ecd000  
+mmap(0x74ca8503e000, 319488, PROT_READ, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x195000) = 0x74ca8503e000  
+mmap(0x74ca8508c000, 24576, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_DENYWRITE, 3, 0x1e3000) = 0x74ca8508c000  
+mmap(0x74ca85092000, 31672, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_FIXED|MAP_ANONYMOUS, -1, 0) = 0x74ca85092000  
+close(3)                                = 0  
+mmap(NULL, 12288, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x74ca84ea6000  
+arch_prctl(ARCH_SET_FS, 0x74ca84ea6740) = 0  
+set_tid_address(0x74ca84ea6a10)         = 24443  
+set_robust_list(0x74ca84ea6a20, 24)     = 0  
+rseq(0x74ca84ea7060, 0x20, 0, 0x53053053) = 0  
+mprotect(0x74ca8508c000, 16384, PROT_READ) = 0  
+mprotect(0x57c571b12000, 4096, PROT_READ) = 0  
+mprotect(0x74ca8510b000, 8192, PROT_READ) = 0  
+prlimit64(0, RLIMIT_STACK, NULL, {rlim_cur=8192*1024, rlim_max=RLIM64_INFINITY}) = 0  
+munmap(0x74ca8509c000, 215875)          = 0  
+exit_group(0)                           = ?  
++++ exited with 0 +++
+```
 

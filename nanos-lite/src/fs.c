@@ -60,7 +60,7 @@ int fs_open(const char *pathname, int flags, int mode) {
 
   // Log("Open [fd=%d], total [%d]", descriptor, FS_TABLE_LEN);
   if (!IS_FD_VALID(descriptor)) {
-    Log("%s", pathname);
+    Log("[%s]", pathname);
     assert(IS_FD_VALID(descriptor));
   }
   file_pos[descriptor] = 0; // when open the pos is set to zero

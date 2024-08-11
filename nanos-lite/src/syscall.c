@@ -2,6 +2,7 @@
 #include "amdev.h"
 #include "fs.h"
 #include "log.h"
+#include "proc.h"
 #include <common.h>
 #include <stdint.h>
 #include <sys/time.h>
@@ -11,7 +12,23 @@ static inline int sys_yield() {
   return 0;
 }
 
+static int sys_execve(const char *fname, char *const argv[],
+                      char *const envp[]) {
+  /* On success, execve() does not return, on error -1 is returned,
+   * and errno is set to indicate the error.*/
+  // we only consider fname here
+
+  // call naive load, pcb is not used
+  extern void naive_uload(PCB * pcb, char const *filename);
+  naive_uload(NULL, fname);
+  assert(0);
+  return -1;
+}
+
 static inline int sys_exit(int const status) {
+  // call /bin/menu
+  sys_execve("/bin/nterm", NULL, NULL);
+  assert(0);
   // status is passed by a0
   halt(status);
 }
@@ -35,7 +52,6 @@ static inline size_t sys_lseek(int fd, size_t offset, int whence) {
 static inline size_t sys_read(int fd, void *buf, size_t len) {
   return fs_read(fd, buf, len);
 }
-
 static int sys_gettimeofday(struct timeval *tv, struct timezone *tz) {
   // gettimeofday() and settimeofday() return 0 for success.
   // On error, -1 is returned and errno is set to indicate the error.
@@ -91,6 +107,10 @@ void do_syscall(Context *c) {
   case SYS_gettimeofday:
     c->GPRx = (uintptr_t)sys_gettimeofday((struct timeval *)a[1],
                                           (struct timezone *)a[2]);
+    break;
+  case SYS_execve:
+    c->GPRx = (uintptr_t)sys_execve((char const *)a[1], (char *const *)a[2],
+                                    (char *const *)a[3]);
     break;
   default:
     panic("Unhandled syscall ID = %d", a[0]);

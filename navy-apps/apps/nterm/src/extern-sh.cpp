@@ -59,7 +59,8 @@ void extern_app_run(const char *app_path) {
 
   while (1) {
     poll_terminal();
-    char buf[256], *p = buf, ch;
+    char buf[256], *p = buf ;
+    int ch = 0;
     while ((ch = getc(stdin)) != -1) {
       *p ++ = ch;
       if (ch == '\n') break;
