@@ -48,7 +48,33 @@ bool cte_init(Context *(*handler)(Event, Context *)) {
 }
 
 Context *kcontext(Area kstack, void (*entry)(void *), void *arg) {
-  return NULL;
+  /*
+
+  |               |
+  +---------------+ <---- kstack.end
+  |               |
+  |    context    |
+  |               |
+  +---------------+ <--+
+  |               |    |
+  |               |    |
+  |               |    |
+  |               |    |
+  +---------------+    |
+  |       cp      | ---+
+  +---------------+ <---- kstack.start
+  |               |
+
+  */
+  // construct a context at the bottom of stack, then return a pointer
+
+  Context *const ret =
+      (Context *)((intptr_t)kstack.end - (intptr_t)sizeof(Context));
+  ret->mepc = (uintptr_t)entry; // set the entry point
+  // in order to pass difftest
+  ret->mstatus = 0x1800;
+  ret->gpr[10] = (uintptr_t)arg; // args pass by a0
+  return ret;
 }
 
 void yield() {
