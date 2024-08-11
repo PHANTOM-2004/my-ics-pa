@@ -98,8 +98,7 @@ static Context *schedule(Event ev, Context *prev) {
 因此我们的`entry`这个函数指针正是`mepc`应当存储的值
 
 ```c
-  Context *const ret =
-      (Context *)((intptr_t)kstack.end - (intptr_t)sizeof(Context));
+  Context *const ret =   Context *const ret = (Context*)kstack.end - 1;
   ret->mepc = (uintptr_t)entry; // set the entry point
   // in order to pass difftest
   ret->mstatus = 0x1800;
@@ -148,5 +147,70 @@ Context *schedule(Context *prev) {
 ![](assets/Pasted%20image%2020240811181206.png)
 如上图, 就是这样, 首先输出`cc`.
 
--- -- 
+-- --  
 ### 用户进程
+
+#### 正确设置栈指针
+
+> 用户程序的入口位于`navy-apps/libs/libos/src/crt0/start.S`中的`_start()`函数, 这里的`crt`是`C RunTime`的缩写, `0`的含义表示最开始. `_start()`函数会调用`navy-apps/libs/libos/src/crt0/crt0.c`中的`call_main()`函数, 然后调用用户程序的`main()`函数, 从`main()`函数返回后会调用`exit()`结束运行.
+
+> 于是Nanos-lite和Navy作了一项约定: Nanos-lite把栈顶位置设置到GPRx中, 然后由Navy里面的`_start`来把栈顶位置真正设置到栈指针寄存器中.
+
+我们约定的GPRx就是`a0`
+```asm
+  mv s0, zero
+  mv sp, a0 
+  jal call_main
+```
+
+但是这还没有结束, `heap.end`具体是什么? 我们`log`一下就可以发现, 实际上这在前面也写过了
+```
+88000000
+```
+这正是我们需要放到`a0`中的数字. 但是这个并不能在`NANOS`中的因为这是`ISA`独立的. 因此这个设置只能是在上下文恢复的过程中设置的. 
+
+虽然说这样, 但是思考过后, 唯一的方法只能是在`nanos-lite`这里就直接设置栈顶指针. 但是是通过上下文的方式
+
+
+
+#### 实现`ucontext`
+这个几乎和`kcontext`相同, 但是这里不需要传递参数. 
+
+#### 实现`context_uload`
+
+> 不过你还是需要思考, 对于用户进程来说, 它需要一个什么样的状态来开始执行呢?
+
+我们可以想一想之前的`kload`做了什么. `yield-os`之中, 我们首先通过`kcontext`设置了对应的栈. 
+我们在栈里面设置的是一个`context`, 包含了寄存器信息, 尤其是`epc`信息, `epc`之中存放的是`entry`.
+
+但是如果按照这样, 我们把用户程序加载进来, 很显然能够发现一个问题, 总不能每次用户程序都从`elf`之中的`entry`从头开始吧? 
+
+再思考一下. 我们上来`load`了一个用户程序, 然后等待输入的时候`yield`, 此时保存的是用户程序的现场, 包括`epc`等等. 这个时候我们是没有使用`entry`的, 这个`entry`实际上只有我们第一次的时候用到了. 
+
+```c
+void context_uload(PCB *const pcb, char const *const fname) {
+  // NOTE:heap.end is the stack top for user program
+
+  Area const kstack_area = {
+      .start = (void *)pcb,
+      .end = (void *)((uintptr_t)pcb + (uintptr_t)sizeof(pcb->stack))};
+
+  extern uintptr_t loader(PCB *pcb, const char *filename) ;
+  uintptr_t const entry = loader(pcb, fname);//get_elf_entry(fname);
+
+  pcb->cp = ucontext(NULL, kstack_area, (void *)entry);
+  pcb->cp->GPRx = (uintptr_t)heap.end;
+}
+```
+
+
+![](assets/Pasted%20image%2020240811215342.png)
+
+
+这里我尝试使用`native`但是错误了, 排查了原因可以发现
+```c
+  pcb->cp = ucontext(NULL, kstack_area, (void *)entry);
+```
+我这里使用了空指针, 但是实际上不应该是空指针. 现在是空指针只是因为我没有处理, 但是`native`的`am`是处理的. 因此会发生段错误.
+
+

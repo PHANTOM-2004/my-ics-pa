@@ -15,12 +15,16 @@ static const char *keyname[256]
     __attribute__((used)) = {[AM_KEY_NONE] = "NONE", AM_KEYS(NAME)};
 
 size_t serial_write(const void *buf, size_t offset, size_t len) {
+  yield();
+
   for (size_t i = 0; i < len; i++)
     putch(*((char const *)buf + i));
   return len;
 }
 
 size_t events_read(void *buf, size_t offset, size_t len) {
+  yield();
+
   AM_INPUT_KEYBRD_T const kbd = io_read(AM_INPUT_KEYBRD);
 
   if (kbd.keycode == AM_KEY_NONE) // no valid key

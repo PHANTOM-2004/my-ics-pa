@@ -1,6 +1,5 @@
 #include "am.h"
 #include <common.h>
-#include "proc.h"
 
 extern void do_syscall(Context *c);
 extern Context *schedule(Context *prev) ;
@@ -14,6 +13,8 @@ static Context *do_event(Event e, Context *c) {
   case EVENT_SYSCALL:
     // printf("Handle EVENT_SYSCALL\n");
     do_syscall(c);
+    break;
+  case EVENT_IRQ_TIMER: // just recongnize now
     break;
   default:
     panic("Unhandled event ID = %d", e.event);

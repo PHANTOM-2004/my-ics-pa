@@ -68,8 +68,7 @@ Context *kcontext(Area kstack, void (*entry)(void *), void *arg) {
   */
   // construct a context at the bottom of stack, then return a pointer
 
-  Context *const ret =
-      (Context *)((intptr_t)kstack.end - (intptr_t)sizeof(Context));
+  Context *const ret = (Context*)kstack.end - 1;
   ret->mepc = (uintptr_t)entry; // set the entry point
   // in order to pass difftest
   ret->mstatus = 0x1800;
