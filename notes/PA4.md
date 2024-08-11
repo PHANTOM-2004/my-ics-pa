@@ -111,4 +111,42 @@ static Context *schedule(Event ev, Context *prev) {
 这里同样是参数传递的问题, 显然我们上面说过了, 这里`void*`是通过`a0`进行传递的.
 ![](assets/Pasted%20image%2020240811165547.png)
 
+-- -- 
+### `OS`中的上下文切换
 
+![](assets/Pasted%20image%2020240811170152.png)
+
+> `schedule`函数
+
+```c
+Context *schedule(Context *prev) {
+  current->cp = prev;
+  current = (current == &pcb[0] ? &pcb[1] : &pcb[0]);
+  return current->cp;
+}
+```
+
+假如当前正在运行的`PCB`是`1`号, 那么设置`1`号的`cp`为当前的`cp`. 同时返回`2`号的上下文`cp`.
+假如当前正在运行的`PCB`是`2`号, 那么设置`2`号的`cp`为当前的`cp`. 同时返回`1`号的上下文`cp`.
+
+这里的设置其实就是保存的意思. 注意存储在`current`, 如果不保存, 那么`current`之中就不可能返回正确的上下文.
+
+
+![](assets/Pasted%20image%2020240811180356.png)
+
+> 这里`schedule`的理解很重要
+
+```c
+  context_kload(&pcb[0], hello_fun, (void *)0xcc);
+  context_kload(&pcb[1], hello_fun, (void *)0xff);
+  switch_boot_pcb();
+  yield(); // add yield here
+```
+
+首先第一次`yield`的时候, 我们也不知道`Context* c`是哪里, 因为是保存的当时的现场. 于是第一次`current`的等号必然不成立, 因此`current`被设置为`0`号. 恢复`0`号的现场. 之后就是正常交错了.
+
+![](assets/Pasted%20image%2020240811181206.png)
+如上图, 就是这样, 首先输出`cc`.
+
+-- -- 
+### 用户进程

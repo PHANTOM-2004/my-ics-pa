@@ -8,12 +8,13 @@
 #endif
 #include <stdint.h>
 struct Context {
-  // TODO: add void* pdir, union with gpr[0] or whole gpr[?]
-  uintptr_t gpr[NR_REGS];
+  union {
+    uintptr_t gpr[NR_REGS];
+    void *pdir; // share with gpr[0]
+  };
   uintptr_t mcause;
   uintptr_t mstatus;
   uintptr_t mepc;
-  void *pdir;
 };
 
 #ifdef __riscv_e
