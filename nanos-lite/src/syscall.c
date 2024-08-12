@@ -3,8 +3,6 @@
 #include "fs.h"
 #include "log.h"
 #include "proc.h"
-#include <common.h>
-#include <stdint.h>
 #include <sys/time.h>
 
 static inline int sys_yield() {
@@ -12,22 +10,29 @@ static inline int sys_yield() {
   return 0;
 }
 
-static int sys_execve(const char *fname, char *const argv[],
+static int sys_execve(const char *fname, char const *argv[],
                       char *const envp[]) {
   /* On success, execve() does not return, on error -1 is returned,
    * and errno is set to indicate the error.*/
   // we only consider fname here
 
-  // call naive load, pcb is not used
-  extern void naive_uload(PCB * pcb, char const *filename);
-  naive_uload(NULL, fname);
+  // now call context_uload
+  Log("call sys_execve");
+  Log("Switching to app: [%s], argv: [0x%x](arg0:[0x%x]), envp: [0x%x]", fname, argv,
+      argv[0], envp);
+  context_uload(current, fname, argv, envp);
+  switch_boot_pcb();
+  yield();
+
   assert(0);
   return -1;
 }
 
 static inline int sys_exit(int const status) {
   // call /bin/menu
-  sys_execve("/bin/nterm", NULL, NULL);
+  static char const *argv[] = {"/bin/nterm", NULL};
+  static char *const envp[] = {NULL};
+  sys_execve("/bin/nterm", argv, envp);
   assert(0);
   // status is passed by a0
   halt(status);
@@ -109,7 +114,7 @@ void do_syscall(Context *c) {
                                           (struct timezone *)a[2]);
     break;
   case SYS_execve:
-    c->GPRx = (uintptr_t)sys_execve((char const *)a[1], (char *const *)a[2],
+    c->GPRx = (uintptr_t)sys_execve((char const *)a[1], (char const **)a[2],
                                     (char *const *)a[3]);
     break;
   default:

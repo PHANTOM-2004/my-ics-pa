@@ -1,8 +1,10 @@
 #include "elfp.h"
 #include "fs.h"
+#include "klib-macros.h"
+#include "memory.h"
 #include <stdint.h>
 
-static bool check_elf_magic(Elf_Ehdr const * const elf_header) {
+static bool check_elf_magic(Elf_Ehdr const *const elf_header) {
   bool res = *(uint32_t *)elf_header->e_ident == 0x464c457f; // magic number
   Log("ELF magic number correct: %x; Expected type %d",
       *(uint32_t *)elf_header->e_ident, EXPECT_TYPE);
@@ -37,8 +39,9 @@ static void read_elf_header(Elf_parser *const _this) {
 }
 
 static void read_program_header(Elf_parser *const _this) {
-  _this->program_header =
-      (Elf_Phdr *)malloc(_this->program_header_num * sizeof(Elf_Phdr));
+  //NOTE: alloc by new_page
+  _this->program_header = (Elf_Phdr *)new_page(
+      DIVCEIL(_this->program_header_num * sizeof(Elf_Phdr), PGSIZE));
 
   fs_lseek(_this->fd, _this->program_header_offset, SEEK_SET);
   fs_read(_this->fd, _this->program_header,
@@ -49,7 +52,6 @@ static void read_program_header(Elf_parser *const _this) {
 
 void _destructor(Elf_parser *const _this) {
   // fclose(_this->fp);
-  free(_this->program_header);
   fs_close(_this->fd);
 }
 
@@ -71,7 +73,7 @@ uintptr_t get_elf_entry(char const *const fname) {
   fs_read(fd, &header, sizeof(header) * 1);
 
   check_elf_magic(&header);
-  
+
   entry = header.e_entry;
   Log("get entry: 0x%x", entry);
 

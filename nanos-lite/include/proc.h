@@ -18,4 +18,10 @@ typedef union {
 
 extern PCB *current;
 
+extern void context_uload(PCB *const pcb, char const *const fname,
+                          char const *argv[], char *const envp[]);
+
+extern void switch_boot_pcb();
+extern Context *schedule(Context *prev);
+
 #endif

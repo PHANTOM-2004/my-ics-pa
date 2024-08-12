@@ -1,7 +1,8 @@
 #pragma once
 
+#ifndef __NANOS_LITE_LOG_H__
+#define __NANOS_LITE_LOG_H__
 #include "common.h"
-#include <stdint.h>
 
 #define ANSI_FG_BLACK   "\33[1;30m"
 #define ANSI_FG_RED     "\33[1;31m"
@@ -27,4 +28,6 @@
 int strace(uintptr_t const ev_type, uintptr_t const a0, uintptr_t const a1,
            uintptr_t const a2, uintptr_t epc);
 void print_strace();
+#endif
+
 #endif

@@ -1,13 +1,15 @@
-#include "fs.h"
-#include <proc.h>
 #include "elfp.h"
+#include "fs.h"
+#include "klib-macros.h"
+#include "memory.h"
+#include <proc.h>
+#include <stdint.h>
+
 
 extern uint8_t ramdisk_start;
 extern uint8_t ramdisk_end;
 size_t ramdisk_read(void *buf, size_t offset, size_t len);
 size_t ramdisk_write(const void *buf, size_t offset, size_t len);
-
-
 
 uintptr_t loader(PCB *pcb, const char *filename) {
   Log("call loader");
@@ -24,23 +26,31 @@ uintptr_t loader(PCB *pcb, const char *filename) {
     Elf_Phdr const *const p = _this->program_header + i;
 
     assert(p->p_memsz >= p->p_filesz);
-
-    uint8_t *buffer = (uint8_t *)malloc(sizeof(uint8_t) * p->p_filesz);
+    
+    // NOTE: alloc by new_page
+    uint8_t *buffer =
+        (uint8_t *)new_page(DIVCEIL(sizeof(uint8_t) * p->p_filesz, PGSIZE));
     fs_lseek(_this->fd, p->p_offset, SEEK_SET);
     fs_read(_this->fd, buffer, p->p_filesz); // read files_size
 
     memcpy((void *)(uintptr_t)p->p_vaddr, buffer, p->p_filesz);
 
-    memset((void *)((uintptr_t)p->p_paddr + (uintptr_t)p->p_filesz), 0,
-           p->p_memsz - p->p_filesz); // set to zero
+    uintptr_t const zero_begin =
+        ((uintptr_t)p->p_paddr + (uintptr_t)p->p_filesz);
+    uintptr_t const zero_end = (uintptr_t)p->p_paddr + (uintptr_t)p->p_memsz;
+    memset((void *)zero_begin, 0,
+           zero_end - zero_begin); // set to zero
+    //
+    Log("set zero [0x%x, 0x%x)", zero_begin, zero_end);
+    Log("check [0x%x] %x", zero_begin, *(uint32_t *)zero_begin);
 
-    // My immplementation before is that i alloc a buffer with size filesize,
-    // and set the last part zero, but i forget to copy the zero part.
-    // surely I wrote `copy size filesize`, but memsz >= filesize; It is I who
-    // does not set the memory zero ! memcpy((void *)(uintptr_t)p->p_vaddr,
-    // buffer, p->p_filesz);
+    // My immplementation before is that i alloc a buffer with size
+    // filesize, and set the last part zero, but i forget to copy the zero
+    // part. surely I wrote `copy size filesize`, but memsz >= filesize; It
+    // is I who does not set the memory zero ! memcpy((void
+    // *)(uintptr_t)p->p_vaddr, buffer, p->p_filesz);
     /*set to zero*/
-    Log("load ELF to [0x%x, 0x%x)", p->p_vaddr, p->p_vaddr + p->p_memsz);
+    Log("load ELF to [0x%x, 0x%x)", p->p_vaddr, p->p_vaddr + p->p_filesz);
   }
 
   uintptr_t const res = _this->entry_point;
