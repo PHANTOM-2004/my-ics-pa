@@ -459,3 +459,29 @@ read paddr:     808a3eac[4]     read data:      0x698c42f0
 EPERM 1 Operation not permitted  
 ENOENT 2 No such file or directory
 ```
+
+
+## 一些遗憾
+
+```c
+
+  if (cpu.pc >= 0x80000770 && cpu.pc <= 0x80000788) {
+    Log("%08x", 2889);
+  }
+  // iring buffer
+  IFDEF(CONFIG_ITRACE_RINGBUF_ON, iringbuf_trace(_this->logbuf));
+
+
+```
+
+上面这个`if`不写会出错, 写在上面不会错, 写在下面就会错. 这里大概率是由于调用栈导致的. 
+这里的出错指的是`nemu`的`difftest`出错.
+
+我们可以想一下, `Log`总归不可能影响`nemu`之中执行的指令. 但那是如何影响运行中的`difftest`呢? 
+
+不过这个`bug`只有在运行`busybox`的时候才会触发. 
+
+
+
+
+

@@ -7,6 +7,7 @@
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#include <errno.h>
 
 // helper macros
 #define _concat(x, y) x##y
@@ -117,7 +118,11 @@ int _gettimeofday(struct timeval *tv, struct timezone *tz) {
 int _execve(const char *fname, char *const argv[], char *const envp[]) {
   /* On success, execve() does not return, on error -1 is returned, 
    * and errno is set to indicate the error.*/
-  return _syscall_(SYS_execve, (intptr_t)fname, (intptr_t)argv, (intptr_t)envp);
+  int ret =  _syscall_(SYS_execve, (intptr_t)fname, (intptr_t)argv, (intptr_t)envp);
+  if(ret < 0){
+    errno = -ret;
+    return -1;
+  }
 }
 
 // Syscalls below are not used in Nanos-lite.

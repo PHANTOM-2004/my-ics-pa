@@ -1,6 +1,8 @@
 #include "amdev.h"
+#include "log.h"
 #include <fs.h>
 #include <stdint.h>
+#include <errno.h>
 
 typedef size_t (*ReadFn)(void *buf, size_t offset, size_t len);
 typedef size_t (*WriteFn)(const void *buf, size_t offset, size_t len);
@@ -60,8 +62,9 @@ int fs_open(const char *pathname, int flags, int mode) {
 
   // Log("Open [fd=%d], total [%d]", descriptor, FS_TABLE_LEN);
   if (!IS_FD_VALID(descriptor)) {
-    Log("[%s]", pathname);
-    assert(IS_FD_VALID(descriptor));
+    Log("%s[%s]", ANSI_FMT("FILE NOT EXISTS", ANSI_FG_RED), pathname);
+    // assert(IS_FD_VALID(descriptor));
+    return -ENOENT;
   }
   file_pos[descriptor] = 0; // when open the pos is set to zero
   /*The  return  value  of open() is a file descriptor, a small,

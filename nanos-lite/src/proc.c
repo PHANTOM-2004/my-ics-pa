@@ -2,6 +2,7 @@
 #include "memory.h"
 #include <fs.h>
 #include <proc.h>
+#include <stdint.h>
 
 #define MAX_NR_PROC 4
 
@@ -14,9 +15,9 @@ PCB *current = NULL;
 void switch_boot_pcb() { current = &pcb_boot; }
 
 void hello_fun(void *arg) {
-  int j = 1;
+  unsigned int j = 1;
   while (1) {
-    if (j % 10 == 0)
+    if (j % 20 == 0)
       Log("Hello World from Nanos-lite with arg '%p' for the %dth time!",
           (uintptr_t)arg, j);
     j++;
@@ -33,19 +34,8 @@ void context_kload(PCB *const pcb, void (*entry)(void *), void *const arg) {
   Log("initial[%s] cp[0x%x]", "hello_fun", pcb->cp);
 }
 
-void context_uload(PCB *const pcb, char const *const fname, char const *argv[],
-                   char *const envp[]) {
-  // NOTE: use new_page to set user stack
-  Log("Load user [%s]", fname);
-
+static uintptr_t copy_env_argv(char const *argv[], char *const envp[]) {
   int argc = 0, envpc = 0;
-
-  Area const kstack_area = {
-      .start = (void *)pcb,
-      .end = (void *)((uintptr_t)pcb + (uintptr_t)sizeof(pcb->stack))};
-
-  Log("kstack [0x%x, 0x%x)", kstack_area.start, kstack_area.end);
-
   void *const ustk_begin = new_page(STACK_SIZE / PGSIZE);
   Area const ustack_area = {.start = ustk_begin,
                             .end = ustk_begin + STACK_SIZE};
@@ -54,9 +44,7 @@ void context_uload(PCB *const pcb, char const *const fname, char const *argv[],
   uintptr_t sptr = string_area_start;
 
   // first copy argv string
-  Log("argv %x", argv ? argv : 0);
   assert(argv);
-  Log("argv[0] %x", argv[0]);
   for (char const **p = argv; *p != NULL; p++) {
     size_t const len = strlen(*p) + 1;
     sptr -= len;
@@ -104,8 +92,25 @@ void context_uload(PCB *const pcb, char const *const fname, char const *argv[],
   // finally copy argc
   sptr -= sizeof(int);
   *(int *)sptr = argc;
-  Log("ARGC:%d", *(int *)sptr);
+  Log("copied argc: [%d]", *(int *)sptr);
   Log("TOTAL copied [%x, %x]", sptr, string_area_start);
+  return sptr;
+}
+
+void context_uload(PCB *const pcb, char const *const fname, char const *argv[],
+                   char *const envp[]) {
+  // NOTE: use new_page to set user stack
+  Log("Load user [%s]", fname);
+
+  Area const kstack_area = {
+      .start = (void *)pcb,
+      .end = (void *)((uintptr_t)pcb + (uintptr_t)sizeof(pcb->stack))};
+
+  Log("kstack [0x%x, 0x%x)", kstack_area.start, kstack_area.end);
+
+  // then we need to load the strings to user stack
+  // mark string store area
+  uintptr_t const sptr = copy_env_argv(argv, envp);
 
   // load the user program
   extern uintptr_t loader(PCB * pcb, const char *filename);
@@ -113,8 +118,6 @@ void context_uload(PCB *const pcb, char const *const fname, char const *argv[],
 
   pcb->cp = ucontext(NULL, kstack_area, (void *)entry);
   Log("initial[%s] cp[0x%x]", fname, pcb->cp);
-  // then we need to load the strings to user stack
-  // mark string store area
 
   // set the top of user stack
   pcb->cp->GPRx = (uintptr_t)sptr;

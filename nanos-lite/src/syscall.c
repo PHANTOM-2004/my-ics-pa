@@ -18,8 +18,15 @@ static int sys_execve(const char *fname, char const *argv[],
 
   // now call context_uload
   Log("call sys_execve");
-  Log("Switching to app: [%s], argv: [0x%x](arg0:[0x%x]), envp: [0x%x]", fname, argv,
-      argv[0], envp);
+  Log("Switching to app: [%s], argv: [0x%x](arg0:[0x%x]), envp: [0x%x]", fname,
+      argv, argv[0], envp);
+
+  int ret = fs_open(fname, 0, 0);
+  if (ret < 0) { // the file does not exist
+    return ret;  // return -errno, here it is -2
+  } else
+    fs_close(ret);
+
   context_uload(current, fname, argv, envp);
   switch_boot_pcb();
   yield();
@@ -45,7 +52,7 @@ static inline size_t sys_write(int fd, void const *buf, size_t count) {
 static inline int sys_brk(intptr_t const increment) { return 0; }
 
 static inline int sys_open(const char *pathname, int flags, int mode) {
-  return fs_open(pathname, flags, mode);
+  return fs_open(pathname, flags, mode); //  fails: -2
 }
 
 static inline int sys_close(int fd) { return fs_close(fd); }
@@ -114,8 +121,9 @@ void do_syscall(Context *c) {
                                           (struct timezone *)a[2]);
     break;
   case SYS_execve:
-    c->GPRx = (uintptr_t)sys_execve((char const *)a[1], (char const **)a[2],
-                                    (char *const *)a[3]);
+    c->GPRx = (uintptr_t)sys_execve(
+        (char const *)a[1], (char const **)a[2],
+        (char *const *)a[3]); // file not found will return -1
     break;
   default:
     panic("Unhandled syscall ID = %d", a[0]);

@@ -32,7 +32,7 @@ static void sh_handle_cmd(const char *cmd) {
        (and setenv() returns a success status).
     This function makes copies of the strings pointed to by name and value (by
    contrast with putenv(3)).*/
-  setenv("PATH", "/bin", 0);
+  setenv("PATH", "/bin:/usr/bin", 0);
 
   /*The environment of the new process image is specified via the argument envp.
    *The envp argument is an array of pointers to null-terminated strings and
