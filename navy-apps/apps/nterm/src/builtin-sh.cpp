@@ -37,17 +37,32 @@ static void sh_handle_cmd(const char *cmd) {
   /*The environment of the new process image is specified via the argument envp.
    *The envp argument is an array of pointers to null-terminated strings and
    must be terminated by a null pointer.*/
-  static char buf[256] = {};
+  static char buf[1024] = "\0";
+  static char *argv[128] = {NULL};
+
   strncpy(buf, cmd, sizeof(buf) - 1);
   char *p = buf;
-  while (*p) {
-    if (*p == '\n')
-      *p = '\0';
-    p++;
+
+  while (*p && *p != '\n')
+    p++; // trim the \n
+  *p = '\0';
+
+  int cnt = 0;
+  p = strtok(buf, " "); // this time get filename
+  argv[cnt++] = p;
+  assert(argv[0]);
+
+  while ((p = strtok(NULL, " \t")) != NULL) {
+    assert(cnt < sizeof(argv) / sizeof(argv[0]));
+    argv[cnt] = p;
+    assert(argv[cnt]);
+    cnt++;
   }
 
-  char *const argv[] = {buf, NULL};
-  int const ret = execvp(buf, argv);
+  assert(cnt < sizeof(argv) / sizeof(argv[0]));
+  argv[cnt] = NULL;
+
+  int const ret = execvp(argv[0], argv);
   assert(ret != -1);
 }
 

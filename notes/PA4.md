@@ -388,3 +388,74 @@ void context_uload(PCB *const pcb, char const *const fname, char const *argv[],
 
 > 为了实现这一点, 我们可以让`context_uload()`统一通过调用`new_page()`函数来获得用户栈的内存空间. `new_page()`函数在`nanos-lite/src/mm.c`中定义, 它会通过一个`pf`指针来管理堆区, 用于分配一段大小为`nr_page * 4KB`的连续内存区域, 并返回这段区域的首地址. 我们让`context_uload()`通过`new_page()`来分配32KB的内存作为用户栈, 这对PA中的用户程序来说已经足够使用了. 此外为了简化, 我们在PA中无需实现`free_page()`.
 
+> 有一些细节我们并没有完全给出, 例如调用`context_uload()`的`pcb`参数应该传入什么内容, 这个问题就交给你来思考吧!
+
+
+> 最后, 为了结束A的执行流, 我们可以在创建B的上下文之后, 通过`switch_boot_pcb()`修改当前的`current`指针, 然后调用`yield()`来强制触发进程调度. 这样以后, A的执行流就不会再被调度, 等到下一次调度的时候, 就可以恢复并执行B了.
+
+
+<u> 我们应当传入一个PCB, 内核栈我们无所谓谁在使用, 因为他的作用只是作为上下文恢复的. 但是用户栈我们需要考虑是谁在使用, 因此 传递的时候只需要传递`current`即可</u>
+
+
+
+我们梳理一下`sys_execve`的流程
+
+1. 启动时`kload hello, uload app`.
+2. 第一次`yield`切换到`hello`, `hello`之中继续`yield`切换到`app`
+3. `app`之中调用`sys_execve`, 此时`current`指向了`app`的`PCB`, 我们把`current`传递给`uload`.
+4. 调用 `switch_boot_pcb`, `yield`.此时回到了情况`1`但是加载的是新程序
+
+- 测试`exec-test`
+![](assets/Pasted%20image%2020240812153423.png)
+
+- 测试`menu`
+![](assets/Pasted%20image%2020240812153601.png)
+
+- 完善`Nterm`的参数解析
+![](assets/Pasted%20image%2020240812163230.png)
+
+
+### busybox
+
+这里编译的时候加上一些选项
+```makefile
+CFLAGS += -Wno-error=implicit-function-declaration
+CFLAGS += -Wno-error=int-conversion
+```
+
+![](assets/Pasted%20image%2020240812171055.png)
+我们可以看到这里的顺序, 首先加载程序会把前文的数据段覆盖掉. 因此我们需要先加载参数再加载程序.
+
+
+```
+read paddr:     83014ae0[4]     read data:      0x698c42f0
+read paddr:     808a3eac[4]     read data:      0x698c42f0
+```
+
+这里发现一个严重的问题, 就是如果我先拷贝参数再加载发现参数没了. 也就是在`loader`的过程中我们的用户`sp`被`corrupt`了.  回顾我们之前使用的`loader`之中的`malloc`, 我们发现这个东西与`new_page()`提供的空间冲突了. 那么这样的结果就不难解释了. 
+
+```c
+#if !(defined(__ISA_NATIVE__) && defined(__NATIVE_USE_KLIB__))
+  static uint8_t *addr = NULL;
+  if (addr == NULL)
+    addr = heap.start;
+  size = ROUNDUP(size, 8);
+  void *const res = (void *)addr;
+  addr += size;
+  assert((uint32_t)addr >= (uint32_t)heap.start && (uint32_t)addr < (uint32_t)heap.end);
+  for (uint32_t *p = res; p != (uint32_t*)addr; p++)
+    *p = 0; // actually no need to set zero
+
+  return res;
+#endif
+```
+
+因此我们操作系统申请的内存统一使用`new_page`进行管理
+
+> 不过为了遍历`PATH`中的路径, `execvp()`可能会尝试执行一个不存在的用户程序, 例如`/bin/wc`. 因此Nanos-lite在处理`SYS_execve`系统调用的时候就需要检查将要执行的程序是否存在, 如果不存在, 就需要返回一个错误码. 我们可以通过`fs_open()`来进行检查, 如果需要打开的文件不存在, 就返回一个错误的值, 此时`SYS_execve`返回`-2`. 另一方面, libos中的`execve()`还需要检查系统调用的返回值: 如果系统调用的返回值小于0, 则通常表示系统调用失败, 此时需要将系统调用返回值取负, 作为失败原因设置到一个全局的外部变量`errno`中, 然后返回`-1`.
+
+```shell
+~/P/c/N/P/i/nanos-lite (pa4|✚5) $ errno -l  
+EPERM 1 Operation not permitted  
+ENOENT 2 No such file or directory
+```

@@ -10,6 +10,9 @@ endif
 NAME = busybox
 include $(NAVY_HOME)/Makefile
 
+CFLAGS += -Wno-error=implicit-function-declaration
+CFLAGS += -Wno-error=int-conversion
+
 ifeq ($(ISA), native)
 CFLAGS += -I$(WORK_DIR)/include/native/
 else
