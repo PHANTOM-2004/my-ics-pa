@@ -213,4 +213,178 @@ void context_uload(PCB *const pcb, char const *const fname) {
 ```
 我这里使用了空指针, 但是实际上不应该是空指针. 现在是空指针只是因为我没有处理, 但是`native`的`am`是处理的. 因此会发生段错误.
 
+> 一山不容二虎? 
+
+这是因为两者加载的时候用的是同样的栈, 会把对方覆盖掉. 
+
+### 用户进程的参数
+
+> 既然用户进程是操作系统来创建的, 很自然参数和环境变量的传递就需要由操作系统来负责. 最适合存放参数和环境变量的地方就是用户栈了, 因为在首次切换到用户进程的时候, 用户栈上的内容就已经可以被用户进程访问. 于是操作系统在加载用户进程的时候, 还需要负责把`argc/argv/envp`以及相应的字符串放在用户栈中, 并把它们的存放方式和位置作为和用户进程的约定之一, 这样用户进程在`_start`中就可以根据约定访问它们了.
+
+> 这项约定其实属于ABI的内容, ABI手册有一节Process Initialization的内容, 里面详细约定了操作系统需要为用户进程的初始化提供哪些信息. 不过在我们的Project-N系统里面, 我们只需要一个简化版的Process Initialization就够了: 操作系统将`argc/argv/envp`及其相关内容放置到用户栈上, 然后将GPRx设置为`argc`所在的地址.
+
+```
+|               |
++---------------+ <---- ustack.end (0x88000000)
+|  Unspecified  |
++---------------+
+|               | <----------+
+|    string     | <--------+ |
+|     area      | <------+ | |
+|               | <----+ | | |
+|               | <--+ | | | |
++---------------+    | | | | |
+|  Unspecified  |    | | | | |
++---------------+    | | | | |
+|     NULL      |    | | | | |
++---------------+    | | | | |
+|    ......     |    | | | | |
++---------------+    | | | | |
+|    envp[1]    | ---+ | | | |
++---------------+      | | | |
+|    envp[0]    | -----+ | | |
++---------------+        | | |
+|     NULL      |        | | |
++---------------+        | | |
+| argv[argc-1]  | -------+ | |
++---------------+          | |
+|    ......     |          | |
++---------------+          | |
+|    argv[1]    | ---------+ |
++---------------+            |
+|    argv[0]    | -----------+
++---------------+
+|      argc     |
++---------------+ <---- cp->GPRx 
+|               |
+```
+
+> 此外, 上图中的`Unspecified`表示一段任意长度(也可为0)的间隔, 字符串区域中各个字符串的顺序也不作要求, 只要用户进程可以通过`argv/envp`访问到正确的字符串即可.
+
+> 根据这一约定, 你还需要修改Navy中`_start`的代码, 把`argc`的地址作为参数传递给`call_main()`. 然后修改`call_main()`的代码, 让它解析出真正的`argc/argv/envp`, 并调用`main()`
+
+实际上`argc`的地址正是`sp`. 也就是我们的`GPRx`.
+
+我们可以看一下`heap`的空间. 
+```
+heap.start: [0x80359000]      heap.end(GPRx->sp): [0x88000000]
+```
+我们把堆的最后作为用户栈, 这是基于用户栈是从高往低增长的. 
+
+至于这些字符串放在哪里, 正是我需要做的事情. 但是用户栈的大小, 现在似乎还没提到具体的事情. 
+
+
+```c
+void call_main(uintptr_t *args) {
+  // set argc/argv/envp
+  int argc = *(int*) args;
+  char ** argv = (char**) ((int*)args + 1);
+  char **envp = (argv + argc + 1);
+  
+  environ = envp;
+
+  exit(main(argc, argv, envp));
+  assert(0);
+}
+```
+
+更改函数签名
+```c
+void context_uload(PCB *pcb, const char *filename, char *const argv[], char *const envp[]);
+```
+
+这里我有个疑惑的地方, 这几个东西从哪里来? 我从哪里把这几个量拷贝到用户栈上面? 
+
+![](assets/Pasted%20image%2020240812005053.png)
+看到这里我就明白了, 还是要多看两眼, 有些答案可能就在后面
+
+并且当时在想, 用户栈的栈顶应当和参数有关. 因此我们设置
+```c
+pcb->cp->GPRx = //?
+```
+并不总是`heap.end`, 这取决于我们的栈使用情况. 
+
+```c
+void context_uload(PCB *const pcb, char const *const fname, char const *argv[],
+                   char *const envp[]) {
+  // NOTE:heap.end is the stack top for user program
+
+  Area const kstack_area = {
+      .start = (void *)pcb,
+      .end = (void *)((uintptr_t)pcb + (uintptr_t)sizeof(pcb->stack))};
+
+  extern uintptr_t loader(PCB * pcb, const char *filename);
+  uintptr_t const entry = loader(pcb, fname); // get_elf_entry(fname);
+
+  Log("register sp: %x", (uintptr_t)heap.end);
+  pcb->cp = ucontext(NULL, kstack_area, (void *)entry);
+
+  // then we need to load the strings to user stack
+  uintptr_t const string_area_start = ((uintptr_t)kstack_area.end - 64);
+  uintptr_t sptr = string_area_start;
+
+  int argc = 0, envpc = 0;
+
+  // first copy argv string
+  for (char const **p = argv; *p != NULL; p++) {
+    size_t const len = strlen(*p) + 1;
+    sptr -= len;
+    memcpy((void *)sptr, *p, len);
+    argc++;
+  }
+
+  // then copy envp string
+  for (char *const *p = envp; *p != NULL; p++) {
+    size_t const len = strlen(*p) + 1;
+    sptr -= len;
+    memcpy((void *)sptr, *p, len);
+    envpc++;
+  }
+
+  sptr -= 64;                             // let the unspecified = 64;
+  sptr = sptr & (~sizeof(uintptr_t) + 1); // align with pointer
+
+  // copy envp pointer, first is NULL
+  assert(envp[envpc] == NULL);
+  for (int i = envpc; i >= 0; i--) {
+    sptr -= sizeof(char*);
+    char **pos = (void *)sptr;
+    *pos = envp[i];
+  }
+
+  //copy argv pointer, first is NULL
+  assert(argv[argc] == NULL);
+  for (int i = argc; i >= 0; i--) {
+    sptr -= sizeof(char const*);
+    char const **pos = (void *)sptr;
+    *pos = argv[i];
+  }
+
+  // finally copy argc
+  sptr -= sizeof(int);
+  *(int*)sptr = argc;
+
+  // set the top of user stack
+  pcb->cp->GPRx = (uintptr_t)sptr;
+}
+```
+
+> 在`main()`函数中, `argv`和`envp`的类型是`char * []`, 而在`execve()`函数中, 它们的类型则是`char *const []`. 从这一差异来看, `main()`函数中`argv`和`envp`所指向的字符串是可写的, 你知道为什么会这样吗?
+
+这部分内容已经被加载到用户栈之中了, 所以我们可以随便写这些东西. 
+
+### 实现`execve`
+
+为了探究这个问题, 我们需要了解当Nanos-lite尝试通过`SYS_execve`加载B时, A的用户栈里面已经有什么内容. 我们可以从栈底(`heap.end`)到栈顶(栈指针`sp`当前的位置)列出用户栈中的内容:
+
+- Nanos-lite之前为A传递的用户进程参数(`argc/argv/envp`)
+- A从`_start`开始进行函数调用的栈帧, 这个栈帧会一直生长, 直到调用了libos中的`execve()`
+- CTE保存的上下文结构, 这是由于A在`execve()`中执行了系统调用自陷指令导致的
+- Nanos-lite从`__am_irq_handle()`开始进行函数调用的栈帧, 这个栈帧会一直生长, 直到调用了`SYS_execve`的系统调用处理函数
+
+通过上述分析, 我们得出一个重要的结论: 在加载B时, Nanos-lite使用的是A的用户栈! 这意味着在A的执行流结束之前, A的用户栈是不能被破坏的. 因此`heap.end`附近的用户栈是不能被B复用的, 
+
+<u>我们应该申请一段新的内存作为B的用户栈, 来让Nanos-lite把B的参数放置到这个新分配的用户栈里面.</u>
+
+> 为了实现这一点, 我们可以让`context_uload()`统一通过调用`new_page()`函数来获得用户栈的内存空间. `new_page()`函数在`nanos-lite/src/mm.c`中定义, 它会通过一个`pf`指针来管理堆区, 用于分配一段大小为`nr_page * 4KB`的连续内存区域, 并返回这段区域的首地址. 我们让`context_uload()`通过`new_page()`来分配32KB的内存作为用户栈, 这对PA中的用户程序来说已经足够使用了. 此外为了简化, 我们在PA中无需实现`free_page()`.
 
